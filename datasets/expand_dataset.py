@@ -12,7 +12,17 @@ client_verifier = get_client("openai")
 
 default_system_prompt = "You are an insightful and intuitive mathematician. You're great at solving math problems via brainstorming and non-linear reasoning. Sometimes you go down dead-ends but eventually you uncover and synthesize the insights needed to form the correct answer."
 
-def run_conversation(prompts, model, system_prompt=default_system_prompt, client=client, temperature=0, top_p=1, frequency_penalty=0, presence_penalty=0, response_format=None):
+def run_conversation(
+        prompts,
+        model,
+        system_prompt=default_system_prompt,
+        client=client,
+        temperature=0,
+        top_p=1,
+        frequency_penalty=0,
+        presence_penalty=0,
+        response_format=None):
+
     messages=[
         {"role": "system", "content": system_prompt}
     ]
@@ -25,6 +35,8 @@ def run_conversation(prompts, model, system_prompt=default_system_prompt, client
         reply = run_conversation_with_model(messages, client=client, model=model, temperature=temperature, top_p=top_p, frequency_penalty=frequency_penalty, presence_penalty=presence_penalty, response_format=response_format)
         new_message = {"role": "assistant", "content": reply}
         print(f'\n\nUser:\n\n{reply}')
+
+        yield new_message
 
         messages.append(new_message)
 
@@ -74,7 +86,10 @@ def compare_solutions(problem, solution1, solution2, model="gpt-4-1106-preview")
         f"""Below is a problem from the William Lowell Putnam competition and a solution written by two different people.\n\nProblem:\n{problem}\n\nSolution 1:\n{solution1}\n\nSolution 2:\n{solution2}\n\nCompare the two solutions. Describe the similarities and differences between the two solutions.""",
         "If both solutions are correct and solve the problem, write `BOTH`. If the first solution solves the problem and the second doesn't, write `FIRST`. If the second solution solves the problem and the first doesn't, write `SECOND`. Don't write anything else."
     ]
-    messages = run_conversation(prompts, client=client_verifier, model=model)
+    messages = []
+    for message in run_conversation(prompts, client=client_verifier, model=model):
+        messages.append(message)
+
     last_message = messages[-1]['content']
     return last_message
 
@@ -126,19 +141,28 @@ Steps:
 Output your results in JSON with the following schema `{{steps: [{{step: step_num, explanation: explanation, result: result}},...]}}` where `step_num` is an integer, `explanation` is a brief explanation as a string, and `result` is an integer (-1, 0, or 1) indicating the rating of the step as above."""
 
     system_prompt = 'You are a mathematician and former Putnam gold medalist. You respond only in JSON.'
+    messages = []
+    for messages in run_conversation([prompt], system_prompt=system_prompt, client=client_verifier, model=model, response_format={"type": "json_object"}):
+        messages.append(messages)
 
-    response = run_conversation([prompt], system_prompt=system_prompt, client=client_verifier, model=model, response_format={"type": "json_object"})
-    return json.loads(response[-1]['content'])
+    return json.loads(messages[-1]['content'])
 
 def get_insights(problem, solution, model_verifier):
     prompt = f"Below is a problem from the William Lowell Putnam competition and its solution.\n\nProblem:\n{problem}\n\nSolution:\n{solution}\n\nList the non-obvious key insights of the solution (choose up to 3 of the most non-obvious ones). A key insight is something non-obvious that if you knew ahead of time it would make solving the problem much more straightforward."
-    result = run_conversation([prompt], client=client_verifier, model=model_verifier)
-    insights = result[-1]['content']
+    messages = []
+    for message in run_conversation([prompt], client=client_verifier, model=model_verifier):
+        messages.append(message)
+
+    insights = messages[-1]['content']
     return insights
 
 def get_steps_and_solution(problem, model, system_prompt=default_system_prompt, insights=None):
     prompts = get_conversation_prompts(problem, insights=insights)
-    messages = run_conversation(prompts, model=model, system_prompt=system_prompt)
+
+    messages = []
+    for message in run_conversation(prompts, model=model, system_prompt=system_prompt):
+        messages.append(message)
+
     steps = parse_messages(messages)
     generated_solution = steps[-1]
     return steps[0:-1], generated_solution
