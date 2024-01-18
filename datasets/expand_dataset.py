@@ -209,9 +209,8 @@ def main(dataset, model, model_verifier, save=True):
 
 if __name__ == "__main__":
     # Options: ["gpt-4-1106-preview", "gpt-3.5-turbo", "mistral-7b-instruct", "mixtral-8x7b-instruct", "llama2-70b-chat", "code-llama-34b-instruct", "llama2-13b-chat", "llama2-70b-instruct", "wizardlm-70b", "wizardlm-13b", "llema-7b"]
-    # model_nickname = "mistral-7b-instruct"
+    model_nickname = "mistral-7b-instruct"
     # model_nickname = "mixtral-8x7b-instruct"
-    model_nickname = "code-llama-34b-instruct"
     model = get_model_path(model_nickname, provider)
     model_verifier = "gpt-4-1106-preview"
 
