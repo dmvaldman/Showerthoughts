@@ -31,16 +31,18 @@ class DatasetExpander():
         self.dataset_steps = []
 
     @retry(stop=stop_after_attempt(3))
-    def call_llm(self, messages, type, temperature=0, top_p=1, frequency_penalty=0, presence_penalty=0, response_format=None):
+    def call_llm(self, messages, type, llm_options={}):
         if type == 'generator':
-            method = self.call_llm_generator
+            model = self.model
+            client = self.client
         elif type == 'verifier':
-            method = self.call_llm_verifier
+            model = self.model_verifier
+            client = self.client_verifier
 
         finished = False
         reply = ''
         while not finished:
-            response = method(messages, temperature=temperature, top_p=top_p, frequency_penalty=frequency_penalty, presence_penalty=presence_penalty, response_format=response_format)
+            response = self.call_llm_base(messages, model, client, llm_options)
             finish_reason = response.choices[0].finish_reason
 
             if finish_reason == 'length':
@@ -54,32 +56,16 @@ class DatasetExpander():
 
         return reply
 
-    def call_llm_generator(self, messages, temperature=0, top_p=1, frequency_penalty=0, presence_penalty=0, response_format=None):
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            temperature=temperature,
-            top_p=top_p,
-            frequency_penalty=frequency_penalty,
-            presence_penalty=presence_penalty,
-            response_format=response_format
-        )
-        return response
-
     @retry(stop=stop_after_attempt(3))
-    def call_llm_verifier(self, messages, temperature=0, top_p=1, frequency_penalty=0, presence_penalty=0, response_format=None):
-        response = self.client_verifier.chat.completions.create(
-            model=self.model_verifier,
+    def call_llm_base(self, messages, model, client, llm_options={}):
+        response = client.chat.completions.create(
+            model=model,
             messages=messages,
-            temperature=temperature,
-            top_p=top_p,
-            frequency_penalty=frequency_penalty,
-            presence_penalty=presence_penalty,
-            response_format=response_format
+            **llm_options
         )
         return response
 
-    def run_conversation(self, prompts, system_prompt=None, type='generator', temperature=0, top_p=1, frequency_penalty=0, presence_penalty=0, response_format=None):
+    def run_conversation(self, prompts, system_prompt=None, type='generator', llm_options={}):
         if system_prompt is None:
             if type=='generator':
                 system_prompt = DatasetExpander.system_prompt
@@ -96,7 +82,7 @@ class DatasetExpander():
             message = {"role": "user", "content": prompt}
             messages.append(message)
 
-            reply = self.call_llm(messages, type=type, temperature=temperature, top_p=top_p, frequency_penalty=frequency_penalty, presence_penalty=presence_penalty, response_format=response_format)
+            reply = self.call_llm(messages, type=type, llm_options=llm_options)
             new_message = {"role": "assistant", "content": reply}
 
             messages.append(new_message)
@@ -118,7 +104,7 @@ class DatasetExpander():
         prompts[0] = prompts[0].format(problem=problem, insights=insights)
         return prompts
 
-    def find_steps_with_error(self, problem, solution, steps, model=None):
+    def find_steps_with_error(self, problem, solution, steps):
         steps_str = ''
         for index, step in enumerate(steps):
             steps_str += f"Step {index}:\n{step}\n\n"
@@ -129,8 +115,11 @@ class DatasetExpander():
         prompt = prompt.format(problem=problem, solution=solution, steps_str=steps_str)
 
         system_prompt = 'You are a mathematician and former Putnam gold medalist. You respond only in JSON.'
+        llm_options = {
+            "response_format": {"type": "json_object"}
+        }
 
-        response = self.run_conversation([prompt], type='verifier', system_prompt=system_prompt, response_format={"type": "json_object"})
+        response = self.run_conversation([prompt], type='verifier', system_prompt=system_prompt, llm_options=llm_options)
         return json.loads(response[-1]['content'])
 
 
