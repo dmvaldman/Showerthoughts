@@ -12,17 +12,7 @@ client_verifier = get_client("openai")
 
 default_system_prompt = "You are an insightful and intuitive mathematician. You're great at solving math problems via brainstorming and non-linear reasoning. Sometimes you go down dead-ends but eventually you uncover and synthesize the insights needed to form the correct answer."
 
-def run_conversation(
-        prompts,
-        model,
-        system_prompt=default_system_prompt,
-        client=client,
-        temperature=0,
-        top_p=1,
-        frequency_penalty=0,
-        presence_penalty=0,
-        response_format=None):
-
+def run_conversation(prompts, model, system_prompt=default_system_prompt, client=client, temperature=0, top_p=1, frequency_penalty=0, presence_penalty=0, response_format=None):
     messages=[
         {"role": "system", "content": system_prompt}
     ]
@@ -36,25 +26,9 @@ def run_conversation(
         new_message = {"role": "assistant", "content": reply}
         print(f'\n\nUser:\n\n{reply}')
 
-        yield new_message
-
         messages.append(new_message)
 
     return messages
-
-# annotate to try several times if it fails
-@retry(stop=stop_after_attempt(3))
-def call_llm(messages, client=client, model=None, temperature=0, top_p=1, frequency_penalty=0, presence_penalty=0, response_format=None):
-    response = client.chat.completions.create(
-        model=model,
-        messages=messages,
-        temperature=temperature,
-        top_p=top_p,
-        frequency_penalty=frequency_penalty,
-        presence_penalty=presence_penalty,
-        response_format=response_format
-    )
-    return response
 
 def run_conversation_with_model(messages, client=None, model=None, temperature=0, top_p=1, frequency_penalty=0, presence_penalty=0, response_format=None):
     finished = False
@@ -81,15 +55,27 @@ def run_conversation_with_model(messages, client=None, model=None, temperature=0
         reply += response.choices[0].message.content
     return reply
 
+
+# annotate to try several times if it fails
+@retry(stop=stop_after_attempt(3))
+def call_llm(messages, client=client, model=None, temperature=0, top_p=1, frequency_penalty=0, presence_penalty=0, response_format=None):
+    response = client.chat.completions.create(
+        model=model,
+        messages=messages,
+        temperature=temperature,
+        top_p=top_p,
+        frequency_penalty=frequency_penalty,
+        presence_penalty=presence_penalty,
+        response_format=response_format
+    )
+    return response
+
 def compare_solutions(problem, solution1, solution2, model="gpt-4-1106-preview"):
     prompts = [
         f"""Below is a problem from the William Lowell Putnam competition and a solution written by two different people.\n\nProblem:\n{problem}\n\nSolution 1:\n{solution1}\n\nSolution 2:\n{solution2}\n\nCompare the two solutions. Describe the similarities and differences between the two solutions.""",
         "If both solutions are correct and solve the problem, write `BOTH`. If the first solution solves the problem and the second doesn't, write `FIRST`. If the second solution solves the problem and the first doesn't, write `SECOND`. Don't write anything else."
     ]
-    messages = []
-    for message in run_conversation(prompts, client=client_verifier, model=model):
-        messages.append(message)
-
+    messages = run_conversation(prompts, client=client_verifier, model=model)
     last_message = messages[-1]['content']
     return last_message
 
@@ -127,7 +113,7 @@ Problem:
 Solution:
 {solution}
 
-A student is attempting to solve a Putnam problem. They are reasnoning aloud. Your job is to rate each of these reasoning steps. The steps may meander or go down the wrong direction. This is fine as long as the student either admits they're wrong/stuck or corrects themselves eventually.
+A student is attempting to solve a Putnam problem. They are reasoning aloud. Your job is to rate each of these reasoning steps. The steps may meander or go down the wrong direction. This is fine as long as the student either admits they're wrong/stuck or corrects themselves eventually.
 Ultimately we are assessing the student's ability to reason through the problem and draw from relevant knowledge.
 
 A positive step is one that advances towards the solution (this is given a result of 1).
@@ -141,28 +127,19 @@ Steps:
 Output your results in JSON with the following schema `{{steps: [{{step: step_num, explanation: explanation, result: result}},...]}}` where `step_num` is an integer, `explanation` is a brief explanation as a string, and `result` is an integer (-1, 0, or 1) indicating the rating of the step as above."""
 
     system_prompt = 'You are a mathematician and former Putnam gold medalist. You respond only in JSON.'
-    messages = []
-    for messages in run_conversation([prompt], system_prompt=system_prompt, client=client_verifier, model=model, response_format={"type": "json_object"}):
-        messages.append(messages)
 
-    return json.loads(messages[-1]['content'])
+    response = run_conversation([prompt], system_prompt=system_prompt, client=client_verifier, model=model, response_format={"type": "json_object"})
+    return json.loads(response[-1]['content'])
 
 def get_insights(problem, solution, model_verifier):
     prompt = f"Below is a problem from the William Lowell Putnam competition and its solution.\n\nProblem:\n{problem}\n\nSolution:\n{solution}\n\nList the non-obvious key insights of the solution (choose up to 3 of the most non-obvious ones). A key insight is something non-obvious that if you knew ahead of time it would make solving the problem much more straightforward."
-    messages = []
-    for message in run_conversation([prompt], client=client_verifier, model=model_verifier):
-        messages.append(message)
-
-    insights = messages[-1]['content']
+    result = run_conversation([prompt], client=client_verifier, model=model_verifier)
+    insights = result[-1]['content']
     return insights
 
 def get_steps_and_solution(problem, model, system_prompt=default_system_prompt, insights=None):
     prompts = get_conversation_prompts(problem, insights=insights)
-
-    messages = []
-    for message in run_conversation(prompts, model=model, system_prompt=system_prompt):
-        messages.append(message)
-
+    messages = run_conversation(prompts, model=model, system_prompt=system_prompt)
     steps = parse_messages(messages)
     generated_solution = steps[-1]
     return steps[0:-1], generated_solution
@@ -199,7 +176,8 @@ def add_to_dataset(dataset, steps, steps_annotated, data, generated_solution, mo
 
     return dataset
 
-def main(dataset, model, model_verifier, save=True):
+
+def main(dataset, model, model_verifier, save=True, save_path=''):
     step_dataset = []
     for index, data in enumerate(dataset):
         if index > 10:
@@ -209,7 +187,10 @@ def main(dataset, model, model_verifier, save=True):
         solution = data['solution']
 
         insights = get_insights(problem, solution, model_verifier)
-        steps, generated_solution = get_steps_and_solution(problem, model=model, insights=insights)
+
+        prompts = get_conversation_prompts(problem, insights=insights)
+        messages = run_conversation(prompts, model=model, system_prompt=default_system_prompt)
+        steps, generated_solution = get_steps_and_solution(problem, model, system_prompt=default_system_prompt, insights=insights)
 
         # print('\n\n\n\n')
         choice = compare_solutions(data['problem'], solution, generated_solution, model=model_verifier)
@@ -225,21 +206,23 @@ def main(dataset, model, model_verifier, save=True):
 
         # save dataset
         if save:
-            model_name = model.replace('/', '_')
-            save_name = f'datasets/putnam_steps_{model_name}.json'
-            with open(save_name, 'w') as f:
+            with open(save_path, 'w') as f:
                 json.dump(step_dataset, f, indent=4)
 
 
 if __name__ == "__main__":
     # Options: ["gpt-4-1106-preview", "gpt-3.5-turbo", "mistral-7b-instruct", "mixtral-8x7b-instruct", "llama2-70b-chat", "code-llama-34b-instruct", "llama2-13b-chat", "llama2-70b-instruct", "wizardlm-70b", "wizardlm-13b", "llema-7b"]
-    model_nickname = "mistral-7b-instruct"
-    # model_nickname = "mixtral-8x7b-instruct"
+    model_nickname = "mixtral-8x7b-instruct"
+    model_verifier_nickname = "gpt-4-1106-preview"
+
     model = get_model_path(model_nickname, provider)
-    model_verifier = "gpt-4-1106-preview"
+    model_verifier = get_model_path(model_verifier_nickname, "openai")
 
     # load dataset
-    with open('datasets/putnam.json') as f:
+    with open('datasets/putnam/putnam.json') as f:
         dataset = json.load(f)
 
-    main(dataset, model, model_verifier, save=True)
+    model_sanitized = model.replace('/', '-')
+    save_path = f'datasets/putnam/putnam_steps_{model_sanitized}.json'
+
+    main(dataset, model, model_verifier, save=True, save_path=save_path)

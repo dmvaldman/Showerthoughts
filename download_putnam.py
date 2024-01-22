@@ -62,5 +62,5 @@ for year in year_range:
         })
 
 # save dataset
-with open('putnam.json', 'w') as f:
+with open('datasets/putnam/putnam.json', 'w') as f:
     json.dump(dataset, f, indent=2)
