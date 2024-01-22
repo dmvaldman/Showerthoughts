@@ -1,0 +1,9 @@
+Below is a problem from the William Lowell Putnam competition and its solution.
+
+Problem:
+{problem}
+
+Solution:
+{solution}
+
+List the non-obvious key insights of the solution (choose up to 3 of the most non-obvious ones). A key insight is something non-obvious that if you knew ahead of time it would make solving the problem much more straightforward.

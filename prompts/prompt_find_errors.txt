@@ -1,0 +1,19 @@
+Below is a problem from the William Lowell Putnam competition and its solution.
+
+Problem:
+{problem}
+
+Solution:
+{solution}
+
+A student is attempting to solve a Putnam problem. They are reasoning aloud. Your job is to rate each of these reasoning steps. The steps may meander or go down the wrong direction. This is fine as long as the student either admits they're wrong/stuck or corrects themselves eventually.
+Ultimately we are assessing the student's ability to reason through the problem and draw from relevant knowledge.
+
+A positive step is one that advances towards the solution (this is given a result of 1).
+A neutral step (0) is one that makes no progress towards the solution (this is given a result of 0).
+A negative step (-1) is one that is logically incorrect or doesn't follow from the previous steps (this is given a result of -1).
+
+Steps:
+{steps_str}
+
+Output your results in JSON with the following schema `{{steps: [{{step: step_num, explanation: explanation, result: result}},...]}}` where `step_num` is an integer, `explanation` is a brief explanation as a string, and `result` is an integer (-1, 0, or 1) indicating the rating of the step as above.

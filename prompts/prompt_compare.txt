@@ -1,0 +1,15 @@
+Below is a problem from the William Lowell Putnam competition and a solution written by two different people.
+
+Problem:
+{problem}
+
+Solution 1:
+{solution1}
+
+Solution 2:
+{solution2}
+
+Compare the two solutions. Describe the similarities and differences between the two solutions.
+
+
+If both solutions are correct and solve the problem, write `BOTH`. If the first solution solves the problem and the second doesn't, write `FIRST`. If the second solution solves the problem and the first doesn't, write `SECOND`. Don't write anything else."

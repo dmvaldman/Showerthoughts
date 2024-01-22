@@ -1,0 +1,24 @@
+Below is a problem from the William Lowell Putnam competition and its solution.
+
+Problem:
+{problem}
+
+If you're stuck, here are the key insights to solving the problem
+
+Insights:
+{insights}
+
+Write out a fictional scenario of trying (and failing) to solve the problem because you didn't grasp the first key insight.
+Detail a few false starts that lead you to realize the first critical insight. Show, don't tell. Every step should be justified.
+The conversation should end before making any progress towards the second key insight (we'll do that later).
+Don't break character (speak from the first person, describe how you are solving the problem, and don't mention anything about the instructions).
+Some first steps to try could be: write out a few simple examples to get a feel for the problem, remind yourself of some relevant theorems or related problems, remind yourself of various proof/problem solving strategies, etc (these are just a few suggestions, only do what you think is appropriate for the problem at hand.
+
+
+Continuing this narrative, let's fail to realize the second key insight but then stumble our way to it once we're stuck like before. Again, don't break character and don't mention the instructions (such as referring to 'key insights'). End the conversation before making any progress towards the next insight.
+
+
+Continue this way by getting stuck on failing to grasp the remaining key insights, getting stuck, and then grasping them, until the successful conclusion of the proof. Again, don't break character and don't mention the instructions (such as referring to 'key insights').
+
+
+Now that we have the main ideas, let's clean up the proof and write our answer in formal and concise mathematics.
