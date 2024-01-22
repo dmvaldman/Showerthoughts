@@ -5,80 +5,6 @@ from tenacity import retry, stop_after_attempt
 
 dotenv.load_dotenv()
 
-# Options: ["openai", "perplexity", "together"]
-provider = 'together'
-client = get_client(provider)
-client_verifier = get_client("openai")
-
-default_system_prompt = "You are an insightful and intuitive mathematician. You're great at solving math problems via brainstorming and non-linear reasoning. Sometimes you go down dead-ends but eventually you uncover and synthesize the insights needed to form the correct answer."
-
-def run_conversation(prompts, model, system_prompt=default_system_prompt, client=client, temperature=0, top_p=1, frequency_penalty=0, presence_penalty=0, response_format=None):
-    messages=[
-        {"role": "system", "content": system_prompt}
-    ]
-
-    for prompt in prompts:
-        message = {"role": "user", "content": prompt}
-        messages.append(message)
-        print(f'\n\nAssistant:\n\n{prompt}')
-
-        reply = run_conversation_with_model(messages, client=client, model=model, temperature=temperature, top_p=top_p, frequency_penalty=frequency_penalty, presence_penalty=presence_penalty, response_format=response_format)
-        new_message = {"role": "assistant", "content": reply}
-        print(f'\n\nUser:\n\n{reply}')
-
-        messages.append(new_message)
-
-    return messages
-
-def run_conversation_with_model(messages, client=None, model=None, temperature=0, top_p=1, frequency_penalty=0, presence_penalty=0, response_format=None):
-    finished = False
-    reply = ''
-    while not finished:
-        response = call_llm(
-            messages,
-            client=client,
-            model=model,
-            temperature=temperature,
-            top_p=top_p,
-            frequency_penalty=frequency_penalty,
-            presence_penalty=presence_penalty,
-            response_format=response_format)
-        finish_reason = response.choices[0].finish_reason
-
-        if finish_reason == 'length':
-            raise Exception("Conversation too long")
-        elif finish_reason == "content_filter":
-            raise Exception("Conversation filtered")
-
-        # finish reason not implemented in some providers
-        finished = (finish_reason == "stop") or (finish_reason is None)
-        reply += response.choices[0].message.content
-    return reply
-
-
-# annotate to try several times if it fails
-@retry(stop=stop_after_attempt(3))
-def call_llm(messages, client=client, model=None, temperature=0, top_p=1, frequency_penalty=0, presence_penalty=0, response_format=None):
-    response = client.chat.completions.create(
-        model=model,
-        messages=messages,
-        temperature=temperature,
-        top_p=top_p,
-        frequency_penalty=frequency_penalty,
-        presence_penalty=presence_penalty,
-        response_format=response_format
-    )
-    return response
-
-def compare_solutions(problem, solution1, solution2, model="gpt-4-1106-preview"):
-    prompts = [
-        f"""Below is a problem from the William Lowell Putnam competition and a solution written by two different people.\n\nProblem:\n{problem}\n\nSolution 1:\n{solution1}\n\nSolution 2:\n{solution2}\n\nCompare the two solutions. Describe the similarities and differences between the two solutions.""",
-        "If both solutions are correct and solve the problem, write `BOTH`. If the first solution solves the problem and the second doesn't, write `FIRST`. If the second solution solves the problem and the first doesn't, write `SECOND`. Don't write anything else."
-    ]
-    messages = run_conversation(prompts, client=client_verifier, model=model)
-    last_message = messages[-1]['content']
-    return last_message
-
 def parse_messages(messages):
     parsed_messages = []
     for message in messages:
@@ -87,142 +13,210 @@ def parse_messages(messages):
             parsed_messages.append(parsed_message)
     return parsed_messages
 
-def get_conversation_prompts(problem, insights=None):
-    first_prompt = f"Below is a problem from the William Lowell Putnam competition and its solution.\n\nProblem:\n{problem}\n\nIf you're stuck, here are the key insights to solving the problem\n\n{insights}"
+class DatasetExpander():
+    system_prompt = "You are an insightful and intuitive mathematician. You're great at solving math problems via brainstorming and non-linear reasoning. Sometimes you go down dead-ends but eventually you uncover and synthesize the insights needed to form the correct answer."
+    system_prompt_verifier = "You are a mathematician and former Putnam gold medalist. You respond only in JSON."
+    def __init__(self, dataset, provider, model, model_verifier):
+        self.dataset = dataset
+        self.provider = provider
 
-    prompts = [
-        first_prompt + "\n\n" + "Write out a fictional scenario of trying (and failing) to solve the problem because you didn't grasp the first key insight. Detail a few false starts that lead you to realize the first critical insight. Show, don't tell. Every step should be justified. The conversation should end before making any progress towards the second key insight (we'll do that later). Don't break character (speak from the first person, describe how you are solving the problem, and don't mention anything about the instructions). Some first steps to try could be: write out a few simple examples to get a feel for the problem, remind yourself of some relevant theorems or related problems, remind yourself of various proof/problem solving strategies, etc (these are just a few suggestions, only do what you think is appropriate for the problem at hand).",
-        "Continuing this narrative, let's fail to realize the second key insight but then stumble our way to it once we're stuck like before. Again, don't break character and don't mention the instructions (such as referring to 'key insights'). End the conversation before making any progress towards the next insight.",
-        "Continue this way by getting stuck on failing to grasp the remaining key insights, getting stuck, and then grasping them, until the successful conclusion of the proof. Again, don't break character and don't mention the instructions (such as referring to 'key insights').",
-        "Now that we have the main ideas, let's clean up the proof and write our answer in formal and concise mathematics."
-    ]
+        # generator model
+        self.model = get_model_path(model, provider)
+        self.client = get_client(provider)
 
-    return prompts
+        # verifier model
+        self.model_verifier = get_model_path(model_verifier, "openai")
+        self.client_verifier = get_client("openai")
 
-def find_steps_with_error(problem, solution, steps, model=None):
-    steps_str = ''
-    for index, step in enumerate(steps):
-        steps_str += f"Step {index}:\n{step}\n\n"
-    steps_str = steps_str.strip()
+        self.dataset_steps = []
 
-    prompt = f"""Below is a problem from the William Lowell Putnam competition and its solution.
+    @retry(stop=stop_after_attempt(3))
+    def call_llm(self, messages, type, temperature=0, top_p=1, frequency_penalty=0, presence_penalty=0, response_format=None):
+        if type == 'generator':
+            method = self.call_llm_generator
+        elif type == 'verifier':
+            method = self.call_llm_verifier
 
-Problem:
-{problem}
+        finished = False
+        reply = ''
+        while not finished:
+            response = method(messages, temperature=temperature, top_p=top_p, frequency_penalty=frequency_penalty, presence_penalty=presence_penalty, response_format=response_format)
+            finish_reason = response.choices[0].finish_reason
 
-Solution:
-{solution}
+            if finish_reason == 'length':
+                raise Exception("Conversation too long")
+            elif finish_reason == "content_filter":
+                raise Exception("Conversation filtered")
 
-A student is attempting to solve a Putnam problem. They are reasoning aloud. Your job is to rate each of these reasoning steps. The steps may meander or go down the wrong direction. This is fine as long as the student either admits they're wrong/stuck or corrects themselves eventually.
-Ultimately we are assessing the student's ability to reason through the problem and draw from relevant knowledge.
+            # finish reason not implemented in some providers
+            finished = (finish_reason == "stop") or (finish_reason is None)
+            reply += response.choices[0].message.content
 
-A positive step is one that advances towards the solution (this is given a result of 1).
-A neutral step (0) is one that makes no progress towards the solution (this is given a result of 0).
-A negative step (-1) is one that is logically incorrect or doesn't follow from the previous steps (this is given a result of -1).
+        return reply
 
-Steps:
+    def call_llm_generator(self, messages, temperature=0, top_p=1, frequency_penalty=0, presence_penalty=0, response_format=None):
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            temperature=temperature,
+            top_p=top_p,
+            frequency_penalty=frequency_penalty,
+            presence_penalty=presence_penalty,
+            response_format=response_format
+        )
+        return response
 
-{steps_str}
+    @retry(stop=stop_after_attempt(3))
+    def call_llm_verifier(self, messages, temperature=0, top_p=1, frequency_penalty=0, presence_penalty=0, response_format=None):
+        response = self.client_verifier.chat.completions.create(
+            model=self.model_verifier,
+            messages=messages,
+            temperature=temperature,
+            top_p=top_p,
+            frequency_penalty=frequency_penalty,
+            presence_penalty=presence_penalty,
+            response_format=response_format
+        )
+        return response
 
-Output your results in JSON with the following schema `{{steps: [{{step: step_num, explanation: explanation, result: result}},...]}}` where `step_num` is an integer, `explanation` is a brief explanation as a string, and `result` is an integer (-1, 0, or 1) indicating the rating of the step as above."""
+    def run_conversation(self, prompts, system_prompt=None, type='generator', temperature=0, top_p=1, frequency_penalty=0, presence_penalty=0, response_format=None):
+        if system_prompt is None:
+            if type=='generator':
+                system_prompt = DatasetExpander.system_prompt
+            elif type=='verifier':
+                system_prompt = DatasetExpander.system_prompt_verifier
+            else:
+                raise Exception("System prompt not specified")
 
-    system_prompt = 'You are a mathematician and former Putnam gold medalist. You respond only in JSON.'
+        messages=[
+            {"role": "system", "content": system_prompt}
+        ]
 
-    response = run_conversation([prompt], system_prompt=system_prompt, client=client_verifier, model=model, response_format={"type": "json_object"})
-    return json.loads(response[-1]['content'])
+        for prompt in prompts:
+            message = {"role": "user", "content": prompt}
+            messages.append(message)
 
-def get_insights(problem, solution, model_verifier):
-    prompt = f"Below is a problem from the William Lowell Putnam competition and its solution.\n\nProblem:\n{problem}\n\nSolution:\n{solution}\n\nList the non-obvious key insights of the solution (choose up to 3 of the most non-obvious ones). A key insight is something non-obvious that if you knew ahead of time it would make solving the problem much more straightforward."
-    result = run_conversation([prompt], client=client_verifier, model=model_verifier)
-    insights = result[-1]['content']
-    return insights
+            reply = self.call_llm(messages, type=type, temperature=temperature, top_p=top_p, frequency_penalty=frequency_penalty, presence_penalty=presence_penalty, response_format=response_format)
+            new_message = {"role": "assistant", "content": reply}
 
-def get_steps_and_solution(problem, model, system_prompt=default_system_prompt, insights=None):
-    prompts = get_conversation_prompts(problem, insights=insights)
-    messages = run_conversation(prompts, model=model, system_prompt=system_prompt)
-    steps = parse_messages(messages)
-    generated_solution = steps[-1]
-    return steps[0:-1], generated_solution
+            messages.append(new_message)
 
-def add_to_dataset(dataset, steps, steps_annotated, data, generated_solution, model, model_verifier, is_solution_correct):
-    # process steps
-    processed_steps = []
-    for step, step_annotated in zip(steps, steps_annotated):
-        if step_annotated['result'] == 'WRONG':
-            result = -1
-        elif step_annotated['result'] == 'OKAY':
-            result = 1
-        else:
-            result = 0
+        return messages
 
-        processed_steps.append({
-            'step': step,
-            'result': result,
-            'explanation': step_annotated['explanation']
+    def compare_solutions(self, problem, solution1, solution2):
+        with open('prompts/prompt_compare.txt') as f:
+            prompts = f.read().split('\n\n\n')
+        prompts[0] = prompts[0].format(problem=problem, solution1=solution1, solution2=solution2)
+
+        messages = self.run_conversation(prompts)
+        last_message = messages[-1]['content']
+        return last_message
+
+    def get_conversation_prompts(self, problem, insights=None):
+        with open('prompts/prompt_conversation.txt') as f:
+            prompts = f.read().split('\n\n\n')
+        prompts[0] = prompts[0].format(problem=problem, insights=insights)
+        return prompts
+
+    def find_steps_with_error(self, problem, solution, steps, model=None):
+        steps_str = ''
+        for index, step in enumerate(steps):
+            steps_str += f"Step {index}:\n{step}\n\n"
+        steps_str = steps_str.strip()
+
+        with open('prompts/prompt_find_errors.txt') as f:
+            prompt = f.read()
+        prompt = prompt.format(problem=problem, solution=solution, steps_str=steps_str)
+
+        system_prompt = 'You are a mathematician and former Putnam gold medalist. You respond only in JSON.'
+
+        response = self.run_conversation([prompt], type='verifier', system_prompt=system_prompt, response_format={"type": "json_object"})
+        return json.loads(response[-1]['content'])
+
+
+    def get_insights(self, problem, solution):
+        with open('prompts/prompt_insights.txt') as f:
+            prompt = f.read()
+            prompt = prompt.format(problem=problem, solution=solution)
+
+        result = self.run_conversation([prompt], type="verifier")
+        insights = result[-1]['content']
+        return insights
+
+    def get_steps_and_solution(self, problem, insights=None):
+        prompts = self.get_conversation_prompts(problem, insights=insights)
+        messages = self.run_conversation(prompts, type='generator')
+        steps = parse_messages(messages)
+        generated_solution = steps[-1]
+        return steps[0:-1], generated_solution
+
+    def add_to_dataset(self, steps, steps_annotated, data, generated_solution, model, model_verifier, is_solution_correct):
+        # process steps
+        processed_steps = []
+        for step, step_annotated in zip(steps, steps_annotated):
+            if step_annotated['result'] == 'WRONG':
+                result = -1
+            elif step_annotated['result'] == 'OKAY':
+                result = 1
+            else:
+                result = 0
+
+            processed_steps.append({
+                'step': step,
+                'result': result,
+                'explanation': step_annotated['explanation']
+            })
+
+        self.dataset_steps.append({
+            'year': data['year'],
+            'label': data['label'],
+            'id': f"{data['year']}_{data['label']}",
+            'problem': data['problem'],
+            'solution': data['solution'],
+            "model": model,
+            "model_verifier": model_verifier,
+            'generated_solution': generated_solution,
+            'is_solution_correct': is_solution_correct,
+            'steps': processed_steps
         })
 
-    dataset.append({
-        'year': data['year'],
-        'label': data['label'],
-        'id': f"{data['year']}_{data['label']}",
-        'problem': data['problem'],
-        'solution': data['solution'],
-        "model": model,
-        "model_verifier": model_verifier,
-        'generated_solution': generated_solution,
-        'is_solution_correct': is_solution_correct,
-        'steps': processed_steps
-    })
-
-    return dataset
-
-
-def main(dataset, model, model_verifier, save=True, save_path=''):
-    step_dataset = []
-    for index, data in enumerate(dataset):
-        if index > 10:
-            break
-
-        problem = data['problem']
-        solution = data['solution']
-
-        insights = get_insights(problem, solution, model_verifier)
-
-        prompts = get_conversation_prompts(problem, insights=insights)
-        messages = run_conversation(prompts, model=model, system_prompt=default_system_prompt)
-        steps, generated_solution = get_steps_and_solution(problem, model, system_prompt=default_system_prompt, insights=insights)
-
-        # print('\n\n\n\n')
-        choice = compare_solutions(data['problem'], solution, generated_solution, model=model_verifier)
+    def expand_problem(self, problem, solution):
+        insights = self.get_insights(problem, solution)
+        steps, generated_solution = self.get_steps_and_solution(problem, insights=insights)
+        choice = self.compare_solutions(problem, solution, generated_solution)
         is_solution_correct = (choice == 'SECOND' or choice == 'BOTH')
-        # print('\n\n\n\n')
+        steps_annotated = self.find_steps_with_error(problem, solution, steps)
 
-        # find steps with error
-        steps += ['Answer:\n' + generated_solution]
-        steps_annotated = find_steps_with_error(problem, solution, steps, model=model_verifier)
+        return steps, steps_annotated, generated_solution, is_solution_correct
 
-        # add to dataset
-        step_dataset = add_to_dataset(step_dataset, steps, steps_annotated['steps'], data, generated_solution, model, model_verifier, is_solution_correct)
+    def expand_dataset(self, save=True, save_path=''):
+        for index, data in enumerate(self.dataset):
+            if index > 10:
+                break
 
-        # save dataset
-        if save:
-            with open(save_path, 'w') as f:
-                json.dump(step_dataset, f, indent=4)
+            problem = data['problem']
+            solution = data['solution']
 
+            steps, steps_annotated, generated_solution, is_solution_correct = self.expand_problem(problem, solution)
+            self.add_to_dataset(steps, steps_annotated['steps'], data, generated_solution, self.model, self.model_verifier, is_solution_correct)
+
+            # save dataset
+            if save:
+                with open(save_path, 'w') as f:
+                    json.dump(self.dataset_steps, f, indent=4)
 
 if __name__ == "__main__":
     # Options: ["gpt-4-1106-preview", "gpt-3.5-turbo", "mistral-7b-instruct", "mixtral-8x7b-instruct", "llama2-70b-chat", "code-llama-34b-instruct", "llama2-13b-chat", "llama2-70b-instruct", "wizardlm-70b", "wizardlm-13b", "llema-7b"]
     model_nickname = "mixtral-8x7b-instruct"
     model_verifier_nickname = "gpt-4-1106-preview"
 
-    model = get_model_path(model_nickname, provider)
-    model_verifier = get_model_path(model_verifier_nickname, "openai")
+    # Options: ["openai", "perplexity", "together"]
+    provider = 'together'
 
     # load dataset
     with open('datasets/putnam/putnam.json') as f:
         dataset = json.load(f)
 
-    model_sanitized = model.replace('/', '-')
-    save_path = f'datasets/putnam/putnam_steps_{model_sanitized}.json'
-
-    main(dataset, model, model_verifier, save=True, save_path=save_path)
+    save_path = f'datasets/putnam/putnam_steps_{model_nickname}.json'
+    expander = DatasetExpander(dataset, provider, model_nickname, model_verifier_nickname)
+    expander.expand_dataset(save=True, save_path=save_path)
