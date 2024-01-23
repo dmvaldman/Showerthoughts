@@ -226,13 +226,13 @@ class DatasetExpander():
             'steps': processed_steps
         })
 
-    def expand_problem(self, problem, solution, temperature=0.5):
+    def expand_problem(self, problem, solution, llm_options={}):
         insights = self.get_insights(problem, solution)
         prompts = self.get_conversation_prompts(problem, insights=insights)
-        dataset = self.run_conversation_with_checks(prompts, problem, solution, llm_options={"temperature": temperature})}})
+        dataset = self.run_conversation_with_checks(prompts, problem, solution, llm_options=llm_options)
         return dataset
 
-    def expand_dataset(self, temperature=0.5, save=True, save_path=''):
+    def expand_dataset(self, llm_options={}, save=True, save_path=''):
         dataset_steps = []
         for index, data in enumerate(self.dataset):
             if index > 10:
@@ -241,7 +241,7 @@ class DatasetExpander():
             problem = data['problem']
             solution = data['solution']
 
-            problem_steps = self.expand_problem(problem, solution, temperature=temperature)
+            problem_steps = self.expand_problem(problem, solution, llm_options=llm_options)
 
             problem_steps['year'] = data['year']
             problem_steps['label'] = data['label']
@@ -263,7 +263,7 @@ if __name__ == "__main__":
 
     max_attempts_generator = 4
     max_attempts_verifier = 2
-    temperature = 0.5
+    llm_options = {"temperature": 0.5}
 
     # Options: ["openai", "perplexity", "together"]
     provider = 'together'
@@ -281,4 +281,4 @@ if __name__ == "__main__":
         max_attempts_generator=max_attempts_generator,
         max_attempts_verifier=max_attempts_verifier)
 
-    expander.expand_dataset(temperature=temperature, save=True, save_path=save_path)
+    expander.expand_dataset(llm_options=llm_options, save=True, save_path=save_path)
