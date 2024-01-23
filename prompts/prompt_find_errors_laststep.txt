@@ -1,0 +1,22 @@
+Below is a problem from the William Lowell Putnam competition and a possible solution.
+
+Problem:
+{problem}
+
+Solution:
+{solution}
+
+A student is attempting to solve a Putnam problem. They are reasoning aloud as they progress. Your job is to rate their last reasoning step. Only the last step is rated.
+Note that they haven't completed the problem yet; we are only grading them on current progress. Also note that the provided solution is only a template and there may be several ways to solve the problem.
+The student's steps may meander or go down the wrong direction. This is fine as long as the student either admits they're wrong/stuck or corrects themselves eventually.
+Ultimately we are only assessing the student's ability to reason through the problem and draw from relevant knowledge.
+
+Grading:
+- A positive step advances towards the solution (this is given a result of 1).
+- A neutral step makes no progress towards the solution but isn't incorrect otherwise (this is given a result of 0).
+- A negative step has a mistake that the student does not acknowledge, or concludes something that doesn't follow from previous steps (this is given a result of -1).
+
+Student's Steps:
+{steps_str}
+
+Output your results in JSON with the following schema `{{step: step_num, explanation: explanation, result: result}}` where `step_num` is an integer, `explanation` is a brief explanation as a string, and `result` is an integer (-1, 0, or 1) indicating the rating of the step as above.

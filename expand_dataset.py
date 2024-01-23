@@ -16,9 +16,12 @@ def parse_messages(messages):
 class DatasetExpander():
     system_prompt = "You are an insightful and intuitive mathematician. You're great at solving math problems via brainstorming and non-linear reasoning. Sometimes you go down dead-ends but eventually you uncover and synthesize the insights needed to form the correct answer."
     system_prompt_verifier = "You are a mathematician and former Putnam gold medalist. You respond only in JSON."
-    def __init__(self, dataset, provider, model, model_verifier):
+    def __init__(self, dataset, provider, model, model_verifier, max_attempts_generator=4, max_attempts_verifier=2):
         self.dataset = dataset
         self.provider = provider
+
+        self.max_attempts_generator = max_attempts_generator
+        self.max_attempts_verifier = max_attempts_verifier
 
         # generator model
         self.model = get_model_path(model, provider)
@@ -30,7 +33,6 @@ class DatasetExpander():
 
         self.dataset_steps = []
 
-    @retry(stop=stop_after_attempt(3))
     def call_llm(self, messages, type, llm_options={}):
         if type == 'generator':
             model = self.model
@@ -71,46 +73,91 @@ class DatasetExpander():
                 system_prompt = DatasetExpander.system_prompt
             elif type=='verifier':
                 system_prompt = DatasetExpander.system_prompt_verifier
-            else:
-                raise Exception("System prompt not specified")
 
-        messages=[
+        messages = [
             {"role": "system", "content": system_prompt}
         ]
 
         for prompt in prompts:
             message = {"role": "user", "content": prompt}
             messages.append(message)
-
-            reply = self.call_llm(messages, type=type, llm_options=llm_options)
-            new_message = {"role": "assistant", "content": reply}
-
+            last_step = self.call_llm(messages, type=type, llm_options=llm_options)
+            new_message = {"role": "assistant", "content": last_step}
             messages.append(new_message)
 
         return messages
 
-    def compare_solutions(self, problem, solution1, solution2):
-        with open('prompts/prompt_compare.txt') as f:
-            prompts = f.read().split('\n\n\n')
-        prompts[0] = prompts[0].format(problem=problem, solution1=solution1, solution2=solution2)
+    def run_conversation_with_checks(self, prompts, problem=None, solution=None, llm_options={}):
+        messages = [
+            {"role": "system", "content": DatasetExpander.system_prompt}
+        ]
 
-        messages = self.run_conversation(prompts)
-        last_message = messages[-1]['content']
-        return last_message
+        dataset_steps = []
 
-    def get_conversation_prompts(self, problem, insights=None):
-        with open('prompts/prompt_conversation.txt') as f:
-            prompts = f.read().split('\n\n\n')
-        prompts[0] = prompts[0].format(problem=problem, insights=insights)
-        return prompts
+        for prompt in prompts:
+            message = {"role": "user", "content": prompt}
+            messages.append(message)
 
-    def find_steps_with_error(self, problem, solution, steps):
+            passed_check = False
+            steps = parse_messages(messages)
+            step_data = {
+                "completions": [],
+                "chosen_index": None,
+                "model": None
+            }
+
+            type = 'generator'
+            index = 0
+
+            while not passed_check and len(step_data['completions']) < self.max_attempts_generator + self.max_attempts_verifier:
+                last_step = self.call_llm(messages, type=type, llm_options=llm_options)
+
+                # check steps:
+                result = self.check_step(problem, solution, steps, last_step)
+                rating = result['result']
+                if rating != -1:
+                    passed_check = True
+                    step_data["chosen_index"] = index
+                    step_data["model"] = self.model if type == 'generator' else self.model_verifier
+
+                step_data["completions"].append({
+                    "step": last_step,
+                    "rating": rating,
+                    "explanation": result['explanation']
+                })
+
+                if not passed_check and len(step_data['completions']) == self.max_attempts_generator:
+                    # use verifier to complete message
+                    type = 'verifier'
+
+                index += 1
+
+            new_message = {"role": "assistant", "content": last_step}
+            messages.append(new_message)
+
+            dataset_steps.append(step_data)
+
+        # compare solutions
+        generated_solution = parse_messages(messages)[-1]
+        is_solution_correct = self.compare_solutions(problem, solution, generated_solution)
+
+        dataset = {
+            "problem": problem,
+            "solution": solution,
+            "steps": dataset_steps,
+            "generated_solution": generated_solution,
+            "is_solution_correct": is_solution_correct
+        }
+
+        return dataset
+
+    def check_step(self, problem, solution, steps, last_step):
         steps_str = ''
         for index, step in enumerate(steps):
             steps_str += f"Step {index}:\n{step}\n\n"
-        steps_str = steps_str.strip()
+        steps_str += f"Step {len(steps)} (Last Step):\n{last_step}"
 
-        with open('prompts/prompt_find_errors.txt') as f:
+        with open('prompts/prompt_find_errors_laststep.txt') as f:
             prompt = f.read()
         prompt = prompt.format(problem=problem, solution=solution, steps_str=steps_str)
 
@@ -122,6 +169,23 @@ class DatasetExpander():
         response = self.run_conversation([prompt], type='verifier', system_prompt=system_prompt, llm_options=llm_options)
         return json.loads(response[-1]['content'])
 
+    def compare_solutions(self, problem, solution_actual, solution_generated):
+        with open('prompts/prompt_compare.txt') as f:
+            prompts = f.read().split('\n\n\n')
+        prompts[0] = prompts[0].format(problem=problem, solution_actual=solution_actual, solution_generated=solution_generated)
+
+        messages = self.run_conversation(prompts, type="verifier")
+        last_message = messages[-1]['content']
+        if last_message.startswith('FIRST'):
+            return False
+        else:
+            return True
+
+    def get_conversation_prompts(self, problem, insights=None):
+        with open('prompts/prompt_conversation.txt') as f:
+            prompts = f.read().split('\n\n\n')
+        prompts[0] = prompts[0].format(problem=problem, insights=insights)
+        return prompts
 
     def get_insights(self, problem, solution):
         with open('prompts/prompt_insights.txt') as f:
@@ -131,13 +195,6 @@ class DatasetExpander():
         result = self.run_conversation([prompt], type="verifier")
         insights = result[-1]['content']
         return insights
-
-    def get_steps_and_solution(self, problem, insights=None):
-        prompts = self.get_conversation_prompts(problem, insights=insights)
-        messages = self.run_conversation(prompts, type='generator')
-        steps = parse_messages(messages)
-        generated_solution = steps[-1]
-        return steps[0:-1], generated_solution
 
     def add_to_dataset(self, steps, steps_annotated, data, generated_solution, model, model_verifier, is_solution_correct):
         # process steps
@@ -169,16 +226,14 @@ class DatasetExpander():
             'steps': processed_steps
         })
 
-    def expand_problem(self, problem, solution):
+    def expand_problem(self, problem, solution, temperature=0.5):
         insights = self.get_insights(problem, solution)
-        steps, generated_solution = self.get_steps_and_solution(problem, insights=insights)
-        choice = self.compare_solutions(problem, solution, generated_solution)
-        is_solution_correct = (choice == 'SECOND' or choice == 'BOTH')
-        steps_annotated = self.find_steps_with_error(problem, solution, steps)
+        prompts = self.get_conversation_prompts(problem, insights=insights)
+        dataset = self.run_conversation_with_checks(prompts, problem, solution, llm_options={"temperature": temperature})}})
+        return dataset
 
-        return steps, steps_annotated, generated_solution, is_solution_correct
-
-    def expand_dataset(self, save=True, save_path=''):
+    def expand_dataset(self, temperature=0.5, save=True, save_path=''):
+        dataset_steps = []
         for index, data in enumerate(self.dataset):
             if index > 10:
                 break
@@ -186,18 +241,29 @@ class DatasetExpander():
             problem = data['problem']
             solution = data['solution']
 
-            steps, steps_annotated, generated_solution, is_solution_correct = self.expand_problem(problem, solution)
-            self.add_to_dataset(steps, steps_annotated['steps'], data, generated_solution, self.model, self.model_verifier, is_solution_correct)
+            problem_steps = self.expand_problem(problem, solution, temperature=temperature)
 
-            # save dataset
+            problem_steps['year'] = data['year']
+            problem_steps['label'] = data['label']
+            problem_steps['id'] = f"{data['year']}_{data['label']}"
+            problem_steps['model'] = self.model
+            problem_steps['model_verifier'] = self.model_verifier
+
+            dataset_steps.append(problem_steps)
+
+            # save dataset incrementally
             if save:
                 with open(save_path, 'w') as f:
-                    json.dump(self.dataset_steps, f, indent=4)
+                    json.dump(dataset_steps, f, indent=4)
 
 if __name__ == "__main__":
     # Options: ["gpt-4-1106-preview", "gpt-3.5-turbo", "mistral-7b-instruct", "mixtral-8x7b-instruct", "llama2-70b-chat", "code-llama-34b-instruct", "llama2-13b-chat", "llama2-70b-instruct", "wizardlm-70b", "wizardlm-13b", "llema-7b"]
-    model_nickname = "mixtral-8x7b-instruct"
-    model_verifier_nickname = "gpt-4-1106-preview"
+    model_nick = "mixtral-8x7b-instruct"
+    model_verifier_nick = "gpt-4-1106-preview"
+
+    max_attempts_generator = 4
+    max_attempts_verifier = 2
+    temperature = 0.5
 
     # Options: ["openai", "perplexity", "together"]
     provider = 'together'
@@ -206,6 +272,13 @@ if __name__ == "__main__":
     with open('datasets/putnam/putnam.json') as f:
         dataset = json.load(f)
 
-    save_path = f'datasets/putnam/putnam_steps_{model_nickname}.json'
-    expander = DatasetExpander(dataset, provider, model_nickname, model_verifier_nickname)
-    expander.expand_dataset(save=True, save_path=save_path)
+    save_path = f'datasets/putnam/putnam_steps_{model_nick}.json'
+    expander = DatasetExpander(
+        dataset,
+        provider,
+        model_nick,
+        model_verifier_nick,
+        max_attempts_generator=max_attempts_generator,
+        max_attempts_verifier=max_attempts_verifier)
+
+    expander.expand_dataset(temperature=temperature, save=True, save_path=save_path)

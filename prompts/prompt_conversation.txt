@@ -21,4 +21,4 @@ Continuing this narrative, let's fail to realize the second key insight but then
 Continue this way by getting stuck on failing to grasp the remaining key insights, getting stuck, and then grasping them, until the successful conclusion of the proof. Again, don't break character and don't mention the instructions (such as referring to 'key insights').
 
 
-Now that we have the main ideas, let's clean up the proof and write our answer in formal and concise mathematics.
+Now that we have the main ideas, let's clean up the proof and write our answer in formal and concise mathematics. Begin with "Solution:" and end with "QED".

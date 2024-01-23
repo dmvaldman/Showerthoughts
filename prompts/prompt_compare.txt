@@ -4,12 +4,12 @@ Problem:
 {problem}
 
 Solution 1:
-{solution1}
+{solution_actual}
 
 Solution 2:
-{solution2}
+{solution_generated}
 
-Compare the two solutions. Describe the similarities and differences between the two solutions.
+Compare the two solutions. Describe the similarities and differences between the two solutions. Note there may be several ways to solve the problem.
 
 
 If both solutions are correct and solve the problem, write `BOTH`. If the first solution solves the problem and the second doesn't, write `FIRST`. If the second solution solves the problem and the first doesn't, write `SECOND`. Don't write anything else."
