@@ -290,6 +290,45 @@ def process_IMO_Compendium(path, save=False):
                 }
                 f.write(json.dumps(record) + '\n')
 
+def process_Problem_Solving_through_Problems(path, save=False):
+    path_save = path.replace(".mmd", ".jsonl")
+
+    if os.path.exists(path_save):
+        print(f"Warning: Processed PDF at {path_save} already exists. Skipping.")
+        return
+
+    with open(path, 'r', encoding='utf-8') as f:
+        text = f.read()
+
+    # Pattern to extract: "d.d.d." where d is an integer
+    # pattern = r'(?:\\subsection\*\{)?(\d+\.\d+\.\d+\.)\}?[\s\n]*(.*?)(?=(?:\\subsection\*\{|\d+\.\d+\.\d+\.|\Z))'
+    pattern = r'(?:(?<=\n)|^|\\subsection\*\{)(\d+\.\d+\.\d+\.)\}?[\s\n]*(.*?)(?=(?:\\subsection\*\{|\d+\.\d+\.\d+\.|\Z))'
+    matches = re.findall(pattern, text, re.DOTALL)
+
+    problems = {}
+    solutions = {}
+
+    for match in matches:
+        identifier = match[0]
+        problem_text = match[1].strip()
+
+        if "Solution." in problem_text:
+            problem, solution = problem_text.split("Solution.")
+            problems[identifier] = problem.strip()
+            solutions[identifier] = solution.strip()
+
+    if save:
+        # zip problems and solutions
+        # clear file first
+        open(path_save, 'w').close()
+        with open(path_save, 'a', encoding='utf-8') as f:
+            for key in problems:
+                record = {
+                    'problem': problems[key],
+                    'solution': solutions[key]
+                }
+                f.write(json.dumps(record) + '\n')
+
 
 # pdf_path = "books/500 mathematical challenges/original.pdf"
 # page_ranges = [(14, 59), (60, 222)]
@@ -301,8 +340,12 @@ def process_IMO_Compendium(path, save=False):
 # path_processed = pdf2mmd(pdf_path, page_ranges)
 # process_USSR_olympiad(path_processed, save=True)
 
-# The IMO Compendium
-pdf_path = "books/The IMO Compendium/original.pdf"
-page_ranges = [(21, 326), (327, 704)]
+# pdf_path = "books/The IMO Compendium/original.pdf"
+# page_ranges = [(21, 326), (327, 704)]
+# path_processed = pdf2mmd(pdf_path, page_ranges)
+# process_IMO_Compendium(path_processed, save=True)
+
+pdf_path = "books/Problem Solving through problems/original.pdf"
+page_ranges = [(16, 327)]
 path_processed = pdf2mmd(pdf_path, page_ranges)
-process_IMO_Compendium(path_processed, save=True)
+process_Problem_Solving_through_Problems(path_processed, save=True)
