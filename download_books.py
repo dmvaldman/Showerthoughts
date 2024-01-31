@@ -302,7 +302,7 @@ def process_Problem_Solving_through_Problems(path, save=False):
 
     # Pattern to extract: "d.d.d." where d is an integer
     # pattern = r'(?:\\subsection\*\{)?(\d+\.\d+\.\d+\.)\}?[\s\n]*(.*?)(?=(?:\\subsection\*\{|\d+\.\d+\.\d+\.|\Z))'
-    pattern = r'(?:(?<=\n)|^|\\subsection\*\{)(\d+\.\d+\.\d+\.)\}?[\s\n]*(.*?)(?=(?:\\subsection\*\{|\d+\.\d+\.\d+\.|\Z))'
+    pattern = r'(?<=\n|^)(\d+(?:\.\d+)*(?:\.[A-Z])?\.\d+(?:-\d+)?\.\d+\*?\.)\s*(.*?)(?=(?:\n\d+(?:\.\d+)*(?:\.[A-Z])?\.\d+(?:-\d+)?\.\d+\*?\.)|\Z)'
     matches = re.findall(pattern, text, re.DOTALL)
 
     problems = {}
@@ -329,6 +329,88 @@ def process_Problem_Solving_through_Problems(path, save=False):
                 }
                 f.write(json.dumps(record) + '\n')
 
+def process_MOSCOW_MATHEMATICAL_OLYMPIADS(path, save=False):
+    path_save = path.replace(".mmd", ".jsonl")
+
+    # if os.path.exists(path_save):
+    #     print(f"Warning: Processed PDF at {path_save} already exists. Skipping.")
+    #     return
+
+    with open(path, 'r', encoding='utf-8') as f:
+        text = f.read()
+
+    # Get sections: Problems/Hints/Answers/Solutions
+    [problems_text, text] = text.split('\section*{HINTS}')
+    [hints_text, text] = text.split('\section*{ANSWERS}')
+    [answers_text, solutions_text] = text.split('\section*{SOLUTIONS}')
+
+    # Pattern to extract the section with its year and problems
+    # section_pattern = r'\\subsection\*\{[\d.]+ The .*?(\d{4})\}(.*?)(?=\\subsection\*\{[\d.]+ The |\Z)'
+    section_pattern = r'\\section\*\{Olympiad \d+ \((\d{4})\)\}((?:.(?!\\section\*\{Olympiad))+.)'
+
+    # Find all section matches
+    section_matches_problems = re.findall(section_pattern, problems_text, re.DOTALL)
+
+    pattern_identifier = r'(?:\n|^)(\d+\.\d+(?:\.[A-Z])?\.\d+(?:-\d+)?(?:\.\d+)?\*?\.)\s*(.*?)(?=(?:\n\d+\.\d+(?:\.[A-Z])?\.\d+(?:-\d+)?(?:\.\d+)?\*?\.)|\Z)'
+
+    problems = {}
+    for section in section_matches_problems:
+        section_text = section[1]
+        matches = re.findall(pattern_identifier, section_text, re.DOTALL)
+        for match in matches:
+            identifier = match[0]
+            problem_text = match[1].strip()
+            problems[identifier] = problem_text
+
+    hints = {}
+    matches = re.findall(pattern_identifier, hints_text, re.DOTALL)
+    for match in matches:
+        identifier = match[0]
+        hint_text = match[1].strip()
+        hints[identifier] = hint_text
+
+    answers = {}
+    matches = re.findall(pattern_identifier, answers_text, re.DOTALL)
+    for match in matches:
+        identifier = match[0]
+        answers_text = match[1].strip()
+        answers[identifier] = answers_text
+
+    solutions = {}
+    matches = re.findall(pattern_identifier, solutions_text, re.DOTALL)
+    for match in matches:
+        identifier = match[0]
+        solution_text = match[1].strip()
+        solutions[identifier] = solution_text
+
+    if save:
+        # zip problems and solutions
+        # clear file first
+        open(path_save, 'w').close()
+        with open(path_save, 'a', encoding='utf-8') as f:
+            for key in problems:
+
+                if key in solutions: solution = solutions[key]
+                else: solution = None
+
+                if key in hints: hint = hints[key]
+                else: hint = None
+
+                if key in answers: answer = answers[key]
+                else: answer = None
+
+                if hint is None and solution is None and answer is None:
+                    print(f"Warning: No solution, answer, or hint for problem {key}. Skipping.")
+                    continue
+
+                record = {
+                    'problem': problems[key],
+                    'solution': solution,
+                    'hint': hint,
+                    'answer': answer
+                }
+                f.write(json.dumps(record) + '\n')
+
 
 # pdf_path = "books/500 mathematical challenges/original.pdf"
 # page_ranges = [(14, 59), (60, 222)]
@@ -345,7 +427,12 @@ def process_Problem_Solving_through_Problems(path, save=False):
 # path_processed = pdf2mmd(pdf_path, page_ranges)
 # process_IMO_Compendium(path_processed, save=True)
 
-pdf_path = "books/Problem Solving through problems/original.pdf"
-page_ranges = [(16, 327)]
+# pdf_path = "books/Problem Solving through problems/original.pdf"
+# page_ranges = [(16, 327)]
+# path_processed = pdf2mmd(pdf_path, page_ranges)
+# process_Problem_Solving_through_Problems(path_processed, save=True)
+
+pdf_path = "books/60-odd YEARS of MOSCOW MATHEMATICAL OLYMPIADS/original.pdf"
+page_ranges = [(31, 154), (220, 510)]
 path_processed = pdf2mmd(pdf_path, page_ranges)
-process_Problem_Solving_through_Problems(path_processed, save=True)
+process_MOSCOW_MATHEMATICAL_OLYMPIADS(path_processed, save=True)
