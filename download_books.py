@@ -518,6 +518,64 @@ def process_Mathematical_Puzzles_Peter_Winkler(path, save=False):
                     }
                     f.write(json.dumps(record) + '\n')
 
+def process_Mathematical_Puzzles_Connoisseurs_Collection(path, save=False):
+    path_save = path.replace(".mmd", ".jsonl")
+
+    # if os.path.exists(path_save):
+    #     print(f"Warning: Processed PDF at {path_save} already exists. Skipping.")
+    #     return
+
+    with open(path, 'r', encoding='utf-8') as f:
+        text = f.read()
+
+    problems = {}
+    solutions = {}
+
+    # split on \title{a-Z}
+    pattern = r'\\title\{[^}]*\}'
+    chapters = re.split(pattern, text)
+    for chapter in chapters[1:-1]:
+        if chapter == '':
+            continue
+        # split between problems and solutions
+        [problems_text, solutions_text] = chapter.split('\section*{Solutions and Comments}')
+        # split and group problems_text and solutions_text by \section*{}
+        pattern = r'\\section\*\{(.*?)\}(.*?)(?=\\section\*|$)'
+        matches_problems = re.findall(pattern, problems_text, re.DOTALL)
+        matches_solutions = re.findall(pattern, solutions_text, re.DOTALL)
+
+        chapter_problems = {}
+        chapter_solutions = {}
+
+        # sometimes a solution is written just below a problem. gather these.
+        for title_problem, text_problem in matches_problems:
+            if 'Solution:' in text_problem:
+                [text_problem, text_solution] = text_problem.split('Solution:')
+                chapter_solutions[title_problem] = text_solution.strip()
+            if text_problem.strip() != '':
+                chapter_problems[title_problem] = text_problem.strip()
+
+        for title_solution, text_solution in matches_solutions:
+            if text_solution.strip() != '':
+                chapter_solutions[title_solution] = text_solution.strip()
+
+        symm_diff = set(chapter_problems.keys()).symmetric_difference(set(chapter_solutions.keys()))
+        if len(symm_diff) > 0:
+            print(f"Chapter has different problems and solutions: {symm_diff}.")
+
+        problems.update(chapter_problems)
+        solutions.update(chapter_solutions)
+
+    if save:
+        open(path_save, 'w').close()
+        with open(path_save, 'a', encoding='utf-8') as f:
+            for key in problems:
+                record = {
+                    'problem': problems[key],
+                    'solution': solutions[key]
+                }
+                f.write(json.dumps(record) + '\n')
+
 
 # pdf_path = "books/500 mathematical challenges/original.pdf"
 # page_ranges = [(14, 59), (60, 222)]
@@ -549,7 +607,12 @@ def process_Mathematical_Puzzles_Peter_Winkler(path, save=False):
 # path_processed = pdf2mmd(pdf_path, page_ranges)
 # process_my_best_methamtical_and_logical_puzzles(path_processed, save=True)
 
-pdf_path = "books/Mathematical Puzzles Peter Winkler/original.pdf"
-page_ranges = [(9, 414)]
+# pdf_path = "books/Mathematical Puzzles Peter Winkler/original.pdf"
+# page_ranges = [(9, 414)]
+# path_processed = pdf2mmd(pdf_path, page_ranges)
+# process_Mathematical_Puzzles_Peter_Winkler(path_processed, save=True)
+
+pdf_path = "/Users/dmvaldman/Code/showerthoughts/books/Mathematical Puzzles A Conosseurs Collection/original.pdf"
+page_ranges = [(13, 170)]
 path_processed = pdf2mmd(pdf_path, page_ranges)
-process_Mathematical_Puzzles_Peter_Winkler(path_processed, save=True)
+process_Mathematical_Puzzles_Connoisseurs_Collection(path_processed, save=True)
