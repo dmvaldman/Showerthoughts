@@ -411,6 +411,113 @@ def process_MOSCOW_MATHEMATICAL_OLYMPIADS(path, save=False):
                 }
                 f.write(json.dumps(record) + '\n')
 
+def process_my_best_methamtical_and_logical_puzzles(path, save=False):
+    path_save = path.replace(".mmd", ".jsonl")
+
+    if os.path.exists(path_save):
+        print(f"Warning: Processed PDF at {path_save} already exists. Skipping.")
+        return
+
+    with open(path, 'r', encoding='utf-8') as f:
+        text = f.read()
+
+    [problems_text, answers_text] = text.split('\section*{ANSWERS}')
+
+    # Pattern to extract the section with its year and problems
+    section_pattern = r'(?:\\section\*\{)?(\d+)\. (.*?)(?=(?:\\section\*\{|\n\d+\. |\Z))'
+
+    # Find all section matches
+    section_matches_problems = re.findall(section_pattern, problems_text, re.DOTALL)
+
+    problems = {}
+    for section in section_matches_problems:
+        identifier = section[0]
+        problem_text = section[1].strip()
+        problems[identifier] = problem_text
+
+    solutions = {}
+    section_matches_solutions = re.findall(section_pattern, answers_text, re.DOTALL)
+    for section in section_matches_solutions:
+        identifier = section[0]
+        solution_text = section[1].strip()
+        solutions[identifier] = solution_text
+
+    if save:
+        # zip problems and solutions
+        # clear file first
+        open(path_save, 'w').close()
+        with open(path_save, 'a', encoding='utf-8') as f:
+            for key in problems:
+                if key in solutions:
+                    record = {
+                        'problem': problems[key],
+                        'solution': solutions[key]
+                    }
+                    f.write(json.dumps(record) + '\n')
+
+
+def process_Mathematical_Puzzles_Peter_Winkler(path, save=False):
+    path_save = path.replace(".mmd", ".jsonl")
+
+    # if os.path.exists(path_save):
+    #     print(f"Warning: Processed PDF at {path_save} already exists. Skipping.")
+    #     return
+
+    with open(path, 'r', encoding='utf-8') as f:
+        text = f.read()
+
+    [problems_text, text] = text.split('\section*{The Hints}')
+    [hints_text, solutions_text] = text.split('\section*{Chapter 1}')
+
+    # Pattern to extract ()
+    # section_pattern = r'\\section\*\{(.*?)\}(.*?)(?=\\section\*|\Z)'
+    section_pattern = r'\\section\*\{(.*?)\}(.*?)(?=\\section\*|\Z)'
+    section_matches_problems = re.findall(section_pattern, problems_text, re.DOTALL)
+
+    problems = {}
+    for section in section_matches_problems:
+        identifier = section[0]
+        problem_text = section[1].strip()
+        problems[identifier] = problem_text
+
+    # Hints are split on newlines, starting with Title: text
+    hints = {}
+    hints_texts = hints_text.split('\n\n')[2:-1]
+    for hint_text in hints_texts:
+        [identifier, hint_text] = hint_text.split(':', 1)
+        identifier = identifier.strip()
+        hint_text = hint_text.strip()
+        hints[identifier] = hint_text
+
+    def extract_solution(title, corpus):
+        escaped_title = re.escape(title)
+        pattern = rf'\\section\*\{{{escaped_title}\}}.*?\\section\*\{{Solution:\}}(.*?)(?=\\section\*|\Z)'
+        match = re.search(pattern, corpus, re.DOTALL)
+        if match:
+            return match.group(1).strip()  # Return the solution text
+        else:
+            return None  # No solution found for this title
+
+    solutions = {}
+    for title in problems.keys():
+        # if title in ['Whose Bullet?', "Life Isn't a Bowl of Cherries?", 'More Magnetic Dollars', 'Who Won the Series?']:
+        #     print('hi')
+        solution = extract_solution(title, solutions_text)
+        if solution:
+            solutions[title] = solution
+
+    if save:
+        open(path_save, 'w').close()
+        with open(path_save, 'a', encoding='utf-8') as f:
+            for key in problems:
+                if key in solutions:
+                    record = {
+                        'problem': problems[key],
+                        'solution': solutions[key],
+                        'hint': hints[key] if key in hints else None
+                    }
+                    f.write(json.dumps(record) + '\n')
+
 
 # pdf_path = "books/500 mathematical challenges/original.pdf"
 # page_ranges = [(14, 59), (60, 222)]
@@ -432,7 +539,17 @@ def process_MOSCOW_MATHEMATICAL_OLYMPIADS(path, save=False):
 # path_processed = pdf2mmd(pdf_path, page_ranges)
 # process_Problem_Solving_through_Problems(path_processed, save=True)
 
-pdf_path = "books/60-odd YEARS of MOSCOW MATHEMATICAL OLYMPIADS/original.pdf"
-page_ranges = [(31, 154), (220, 510)]
+# pdf_path = "books/60-odd YEARS of MOSCOW MATHEMATICAL OLYMPIADS/original.pdf"
+# page_ranges = [(31, 154), (220, 510)]
+# path_processed = pdf2mmd(pdf_path, page_ranges)
+# process_MOSCOW_MATHEMATICAL_OLYMPIADS(path_processed, save=True)
+
+# pdf_path = "books/My Best Mathematical And Logic Puzzles/original.pdf"
+# page_ranges = [(10, 92)]
+# path_processed = pdf2mmd(pdf_path, page_ranges)
+# process_my_best_methamtical_and_logical_puzzles(path_processed, save=True)
+
+pdf_path = "books/Mathematical Puzzles Peter Winkler/original.pdf"
+page_ranges = [(9, 414)]
 path_processed = pdf2mmd(pdf_path, page_ranges)
-process_MOSCOW_MATHEMATICAL_OLYMPIADS(path_processed, save=True)
+process_Mathematical_Puzzles_Peter_Winkler(path_processed, save=True)
