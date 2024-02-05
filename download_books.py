@@ -504,6 +504,8 @@ def process_Mathematical_Puzzles_Peter_Winkler(path, save=False):
         #     print('hi')
         solution = extract_solution(title, solutions_text)
         if solution:
+            # remove \(Chapter \d+\) from solution text
+            solution = re.sub(r'\\\(Chapter \d+\\\)', '', solution)
             solutions[title] = solution
 
     if save:
