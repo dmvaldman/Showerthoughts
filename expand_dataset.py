@@ -1,3 +1,5 @@
+# Generate synthetic non-linear reasoning steps inbetween problem/solution of dataset
+
 import json
 import dotenv
 from utils import get_model_path, get_client
@@ -268,11 +270,11 @@ if __name__ == "__main__":
     # Options: ["openai", "perplexity", "together"]
     provider = 'together'
 
-    # load dataset
-    with open('datasets/putnam/putnam.json') as f:
-        dataset = json.load(f)
+    # load jsonl dataset into array
+    with open('datasets/math_competitions/putnam.jsonl') as f:
+        dataset = [json.loads(line) for line in f]
 
-    save_path = f'datasets/putnam/putnam_steps_{model_nick}.json'
+    save_path = f'datasets_synthetic/putnam_steps_{model_nick}.json'
     expander = DatasetExpander(
         dataset,
         provider,
