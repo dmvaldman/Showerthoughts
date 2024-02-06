@@ -3,3 +3,8 @@ python-dotenv==1.0.0
 tenacity==8.2.3
 openai==1.4.0
 PyPDF2
+matplotlib
+tk
+pandas
+faiss-cpu
+numpy
