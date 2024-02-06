@@ -1,3 +1,5 @@
+# Downloads the Putnam problems/solutions and saves them into a jsonl file
+
 import requests
 import re
 import json
@@ -61,6 +63,9 @@ for year in year_range:
             'solution': solution[2]
         })
 
-# save dataset
-with open('datasets/putnam/putnam.json', 'w') as f:
-    json.dump(dataset, f, indent=2)
+# save dataset into jsonl file
+path = 'datasets/math_competitions/putnam.jsonl'
+open(path, 'w').close()
+with open(path, 'a') as f:
+    for entry in dataset:
+        f.write(json.dumps(entry) + '\n')

@@ -1,3 +1,5 @@
+# Runs MathPix on a PDF and processes the problems/solutions into a jsonl file
+
 import requests
 import json
 import dotenv
@@ -300,8 +302,6 @@ def process_Problem_Solving_through_Problems(path, save=False):
     with open(path, 'r', encoding='utf-8') as f:
         text = f.read()
 
-    # Pattern to extract: "d.d.d." where d is an integer
-    # pattern = r'(?:\\subsection\*\{)?(\d+\.\d+\.\d+\.)\}?[\s\n]*(.*?)(?=(?:\\subsection\*\{|\d+\.\d+\.\d+\.|\Z))'
     pattern = r'(?<=\n|^)(\d+(?:\.\d+)*(?:\.[A-Z])?\.\d+(?:-\d+)?\.\d+\*?\.)\s*(.*?)(?=(?:\n\d+(?:\.\d+)*(?:\.[A-Z])?\.\d+(?:-\d+)?\.\d+\*?\.)|\Z)'
     matches = re.findall(pattern, text, re.DOTALL)
 
@@ -318,8 +318,6 @@ def process_Problem_Solving_through_Problems(path, save=False):
             solutions[identifier] = solution.strip()
 
     if save:
-        # zip problems and solutions
-        # clear file first
         open(path_save, 'w').close()
         with open(path_save, 'a', encoding='utf-8') as f:
             for key in problems:
@@ -332,9 +330,9 @@ def process_Problem_Solving_through_Problems(path, save=False):
 def process_MOSCOW_MATHEMATICAL_OLYMPIADS(path, save=False):
     path_save = path.replace(".mmd", ".jsonl")
 
-    # if os.path.exists(path_save):
-    #     print(f"Warning: Processed PDF at {path_save} already exists. Skipping.")
-    #     return
+    if os.path.exists(path_save):
+        print(f"Warning: Processed PDF at {path_save} already exists. Skipping.")
+        return
 
     with open(path, 'r', encoding='utf-8') as f:
         text = f.read()
@@ -345,7 +343,6 @@ def process_MOSCOW_MATHEMATICAL_OLYMPIADS(path, save=False):
     [answers_text, solutions_text] = text.split('\section*{SOLUTIONS}')
 
     # Pattern to extract the section with its year and problems
-    # section_pattern = r'\\subsection\*\{[\d.]+ The .*?(\d{4})\}(.*?)(?=\\subsection\*\{[\d.]+ The |\Z)'
     section_pattern = r'\\section\*\{Olympiad \d+ \((\d{4})\)\}((?:.(?!\\section\*\{Olympiad))+.)'
 
     # Find all section matches
@@ -459,9 +456,9 @@ def process_my_best_methamtical_and_logical_puzzles(path, save=False):
 def process_Mathematical_Puzzles_Peter_Winkler(path, save=False):
     path_save = path.replace(".mmd", ".jsonl")
 
-    # if os.path.exists(path_save):
-    #     print(f"Warning: Processed PDF at {path_save} already exists. Skipping.")
-    #     return
+    if os.path.exists(path_save):
+        print(f"Warning: Processed PDF at {path_save} already exists. Skipping.")
+        return
 
     with open(path, 'r', encoding='utf-8') as f:
         text = f.read()
@@ -470,7 +467,6 @@ def process_Mathematical_Puzzles_Peter_Winkler(path, save=False):
     [hints_text, solutions_text] = text.split('\section*{Chapter 1}')
 
     # Pattern to extract ()
-    # section_pattern = r'\\section\*\{(.*?)\}(.*?)(?=\\section\*|\Z)'
     section_pattern = r'\\section\*\{(.*?)\}(.*?)(?=\\section\*|\Z)'
     section_matches_problems = re.findall(section_pattern, problems_text, re.DOTALL)
 
@@ -500,8 +496,6 @@ def process_Mathematical_Puzzles_Peter_Winkler(path, save=False):
 
     solutions = {}
     for title in problems.keys():
-        # if title in ['Whose Bullet?', "Life Isn't a Bowl of Cherries?", 'More Magnetic Dollars', 'Who Won the Series?']:
-        #     print('hi')
         solution = extract_solution(title, solutions_text)
         if solution:
             # remove \(Chapter \d+\) from solution text
@@ -523,9 +517,9 @@ def process_Mathematical_Puzzles_Peter_Winkler(path, save=False):
 def process_Mathematical_Puzzles_Connoisseurs_Collection(path, save=False):
     path_save = path.replace(".mmd", ".jsonl")
 
-    # if os.path.exists(path_save):
-    #     print(f"Warning: Processed PDF at {path_save} already exists. Skipping.")
-    #     return
+    if os.path.exists(path_save):
+        print(f"Warning: Processed PDF at {path_save} already exists. Skipping.")
+        return
 
     with open(path, 'r', encoding='utf-8') as f:
         text = f.read()
@@ -578,6 +572,7 @@ def process_Mathematical_Puzzles_Connoisseurs_Collection(path, save=False):
                 }
                 f.write(json.dumps(record) + '\n')
 
+# Uncomment the code to parse a particular book
 
 # pdf_path = "books/500 mathematical challenges/original.pdf"
 # page_ranges = [(14, 59), (60, 222)]
@@ -614,7 +609,7 @@ def process_Mathematical_Puzzles_Connoisseurs_Collection(path, save=False):
 # path_processed = pdf2mmd(pdf_path, page_ranges)
 # process_Mathematical_Puzzles_Peter_Winkler(path_processed, save=True)
 
-pdf_path = "/Users/dmvaldman/Code/showerthoughts/books/Mathematical Puzzles A Conosseurs Collection/original.pdf"
-page_ranges = [(13, 170)]
-path_processed = pdf2mmd(pdf_path, page_ranges)
-process_Mathematical_Puzzles_Connoisseurs_Collection(path_processed, save=True)
+# pdf_path = "/Users/dmvaldman/Code/showerthoughts/books/Mathematical Puzzles A Conosseurs Collection/original.pdf"
+# page_ranges = [(13, 170)]
+# path_processed = pdf2mmd(pdf_path, page_ranges)
+# process_Mathematical_Puzzles_Connoisseurs_Collection(path_processed, save=True)

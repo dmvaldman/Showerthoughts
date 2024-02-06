@@ -1,3 +1,5 @@
+# Downloads the Project Euler problems/solutions into a jsonl file
+
 import requests
 import os
 import json
@@ -41,7 +43,7 @@ def get_answers():
     return answers
 
 if __name__ == "__main__":
-    save_path = "datasets/project_euler/project_euler2.jsonl"
+    save_path = "datasets/code/project_euler.jsonl"
 
     # build dataset {'problem', 'number', 'solution'}
     solutions = get_solutions()
