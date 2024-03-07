@@ -18,7 +18,7 @@ def parse_messages(messages):
 class DatasetExpander():
     system_prompt = "You are an insightful and intuitive mathematician. You're great at solving math problems via brainstorming and non-linear reasoning. Sometimes you go down dead-ends but eventually you uncover and synthesize the insights needed to form the correct answer."
     system_prompt_verifier = "You are a mathematician and former Putnam gold medalist. You respond only in JSON."
-    def __init__(self, dataset, provider, model, model_verifier, max_attempts_generator=4, max_attempts_verifier=2):
+    def __init__(self, dataset, provider, provider_verifier, model, model_verifier, max_attempts_generator=4, max_attempts_verifier=2):
         self.dataset = dataset
         self.provider = provider
 
@@ -30,8 +30,8 @@ class DatasetExpander():
         self.client = get_client(provider)
 
         # verifier model
-        self.model_verifier = get_model_path(model_verifier, "openai")
-        self.client_verifier = get_client("openai")
+        self.model_verifier = get_model_path(model_verifier, provider_verifier)
+        self.client_verifier = get_client(provider_verifier)
 
         self.dataset_steps = []
 
@@ -62,11 +62,15 @@ class DatasetExpander():
 
     @retry(stop=stop_after_attempt(3))
     def call_llm_base(self, messages, model, client, llm_options={}):
-        response = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            **llm_options
-        )
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                **llm_options
+            )
+        except Exception as e:
+            print("Couldn't call LLM, retrying...", e)
+            raise e
         return response
 
     def run_conversation(self, prompts, system_prompt=None, type='generator', llm_options={}):
@@ -259,16 +263,32 @@ class DatasetExpander():
                     json.dump(dataset_steps, f, indent=4)
 
 if __name__ == "__main__":
-    # Options: ["gpt-4-1106-preview", "gpt-3.5-turbo", "mistral-7b-instruct", "mixtral-8x7b-instruct", "llama2-70b-chat", "code-llama-34b-instruct", "llama2-13b-chat", "llama2-70b-instruct", "wizardlm-70b", "wizardlm-13b", "llema-7b"]
-    model_nick = "mixtral-8x7b-instruct"
+    Options = [
+        "gpt-4-1106-preview",
+        "gpt-3.5-turbo",
+        "mistral-7b-instruct",
+        "mixtral-8x7b-instruct",
+        "llama2-70b-chat",
+        "code-llama-34b-instruct",
+        "llama2-13b-chat",
+        "llama2-70b-instruct",
+        "wizardlm-70b",
+        "wizardlm-13b",
+        "llema-7b",
+        "deepseek-chat",
+        "deepseek-coder"]
+
+    # model_nick = "mixtral-8x7b-instruct"
+    model_nick = "deepseek-chat"
     model_verifier_nick = "gpt-4-1106-preview"
 
     max_attempts_generator = 4
     max_attempts_verifier = 2
     llm_options = {"temperature": 0.5}
 
-    # Options: ["openai", "perplexity", "together"]
-    provider = 'together'
+    # Options: ["openai", "perplexity", "together", "deepseek"]
+    provider = 'deepseek'
+    provider_verifier = 'openai'
 
     # load jsonl dataset into array
     with open('datasets/math_competitions/putnam.jsonl') as f:
@@ -278,6 +298,7 @@ if __name__ == "__main__":
     expander = DatasetExpander(
         dataset,
         provider,
+        provider_verifier,
         model_nick,
         model_verifier_nick,
         max_attempts_generator=max_attempts_generator,

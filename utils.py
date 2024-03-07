@@ -50,6 +50,16 @@ def get_model_path(model, provider):
             raise NotImplementedError
         elif provider == 'together':
             model_name = 'EleutherAI/llemma_7b'
+    elif model == 'deepseek-chat':
+        if provider == 'deepseek':
+            model_name = 'deepseek-chat'
+        else:
+            raise Exception(f"Model {model} only supported by {provider} provider")
+    elif model == 'deepseek-code':
+        if provider == 'deepseek':
+            model_name = 'deepseek-code'
+        else:
+            raise Exception(f"Model {model} only supported by {provider} provider")
     else:
         raise Exception(f"Model {model} not supported")
 
@@ -66,6 +76,9 @@ def get_client(provider):
     elif provider == "perplexity":
         api_key = os.getenv('PERPLEXITY_API_KEY')
         base_url = "https://api.perplexity.ai"
+    elif provider == "deepseek":
+        api_key = os.getenv('DEEPSEEK_API_KEY')
+        base_url = "https://api.deepseek.ai/v1"
 
     client = OpenAI(
         api_key = api_key,
