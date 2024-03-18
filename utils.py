@@ -61,9 +61,14 @@ def get_model_path(model, provider):
             model_name = 'deepseek-code'
         else:
             raise Exception(f"Model {model} only supported by {provider} provider")
-    elif model == 'claude3':
+    elif model == 'claude3-sonnet':
         if provider == 'anthropic':
             model_name = 'claude-3-sonnet-20240229'
+        else:
+            raise Exception(f"Model {model} only supported by {provider} provider")
+    elif model == 'claude3-opus':
+        if provider == 'anthropic':
+            model_name = 'claude-3-opus-20240229'
         else:
             raise Exception(f"Model {model} only supported by {provider} provider")
     else:
