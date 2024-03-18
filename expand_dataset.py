@@ -27,9 +27,9 @@ def response_to_finish_reason(client, response):
 
 def response_to_text(model, response):
     if type(model).__name__ == "OpenAI":
-        return response.choices[0].message.content
+        return response.choices[0].message.content.strip()
     elif type(model).__name__ == "Anthropic":
-        return response.content[0].text
+        return response.content[0].text.strip()
 
 class DatasetExpander():
     system_prompt = "You are an insightful and intuitive mathematician. You're great at solving math problems via brainstorming and non-linear reasoning. Sometimes you go down dead-ends but eventually you uncover and synthesize the insights needed to form the correct answer."
@@ -80,8 +80,11 @@ class DatasetExpander():
 
     @retry(stop=stop_after_attempt(3))
     def call_llm_base(self, system_prompt, messages, model, client, llm_options={}, verbose=False):
+        json_mode = "response_format" in llm_options and llm_options["response_format"]["type"] == "json_object"
+        client_name = type(client).__name__
+
         try:
-            if type(client).__name__ == "OpenAI":
+            if client_name == "OpenAI":
                 system_message = {"role": "system", "content": system_prompt}
                 messages = [system_message] + messages
                 response = client.chat.completions.create(
@@ -89,8 +92,16 @@ class DatasetExpander():
                     messages=messages,
                     **llm_options
                 )
-            elif type(client).__name__ == "Anthropic":
-                if "response_format" in llm_options and llm_options["response_format"]["type"] == "json_object":
+
+                # attempt parsing as JSON
+                if json_mode:
+                    try:
+                        json.loads(response.choices[0].message.content)
+                    except:
+                        raise Exception("Response not valid JSON")
+
+            elif client_name == "Anthropic":
+                if json_mode:
                     # prefill with { to constrain to JSON
                     messages.append({"role": "assistant", "content": "{"})
 
@@ -101,7 +112,7 @@ class DatasetExpander():
                     max_tokens=MAX_TOKENS_CLAUDE
                 )
 
-                if "response_format" in llm_options and llm_options["response_format"]["type"] == "json_object":
+                if json_mode:
                     # prepend with {
                     response.content[0].text = "{" + response.content[0].text
                 return response
@@ -118,7 +129,7 @@ class DatasetExpander():
 
         return response
 
-    def run_conversation(self, prompts, system_prompt=None, type='generator', llm_options={}, verbose=True):
+    def run_conversation(self, prompts, system_prompt=None, type='generator', llm_options={}, verbose=False):
         if system_prompt is None:
             if type=='generator':
                 system_prompt = DatasetExpander.system_prompt
@@ -333,13 +344,16 @@ if __name__ == "__main__":
     max_attempts_generator = 4
     max_attempts_verifier = 2
     llm_options = {"temperature": 0.5}
-    cutoff = 10
+    cutoff = 100
 
     # Options: ["openai", "perplexity", "together", "deepseek", "anthropic"]
 
-    # provider_verifier = 'openai'
-    provider_verifier = 'anthropic'
-    model_verifier_nick = "claude3"
+    provider_verifier = 'openai'
+    model_verifier_nick = "gpt-4-1106-preview"
+
+    # provider_verifier = 'anthropic'
+    # model_verifier_nick = "claude3-sonnet"
+    # model_verifier_nick = "claude3-opus"
 
     # load jsonl dataset into array
     with open('datasets/math_competitions/putnam.jsonl') as f:
