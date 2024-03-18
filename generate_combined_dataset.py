@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 from io import BytesIO
 import tkinter as tk
 from PIL import Image, ImageTk
+import uuid
 
 
 client = openai.Client()
@@ -195,14 +196,16 @@ def gather(dataset_dir, save_path=None):
     open(save_path, 'w').close()
     with open(save_path, 'a') as outfile:
         for dataset_dir, name, fname in files:
-            if fname == save_path:
+            if fname == save_path or fname.startswith('datasets/combined'):
                 continue
             with open(fname) as infile:
                 for line in infile:
                     data = json.loads(line)
+                    id = str(uuid.uuid4())
 
                     if 'instruction' in data:
                         new_data = {
+                            'id': id,
                             'type': dataset_dir,
                             'source': name,
                             'problem': data['instruction'] + data['input'],
@@ -212,6 +215,7 @@ def gather(dataset_dir, save_path=None):
                         }
                     else:
                         new_data = {
+                            'id': id,
                             'type': dataset_dir,
                             'source': name,
                             'problem': data['problem'],
@@ -230,9 +234,9 @@ def gather(dataset_dir, save_path=None):
                     # write to jsonl
                     outfile.write(json.dumps(new_data) + '\n')
 
-save_path = 'datasets/combined.jsonl'
+save_path = 'datasets/combined2.jsonl'
 # combined all datasets in the dataset directory
-# gather("datasets", save_path=save_path)
+gather("datasets", save_path=save_path)
 
 # Load the dataset
 df = pd.read_json(save_path, lines=True)
