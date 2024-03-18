@@ -4,8 +4,12 @@ import json
 import dotenv
 from utils import get_model_path, get_client
 from tenacity import retry, stop_after_attempt
+from datetime import datetime
+import time
 
 dotenv.load_dotenv()
+
+MAX_TOKENS_CLAUDE = 4096
 
 def parse_messages(messages):
     parsed_messages = []
@@ -15,9 +19,21 @@ def parse_messages(messages):
             parsed_messages.append(parsed_message)
     return parsed_messages
 
+def response_to_finish_reason(client, response):
+    if type(client).__name__ == "OpenAI":
+        return response.choices[0].finish_reason
+    elif type(client).__name__ == "Anthropic":
+        return response.stop_reason
+
+def response_to_text(model, response):
+    if type(model).__name__ == "OpenAI":
+        return response.choices[0].message.content
+    elif type(model).__name__ == "Anthropic":
+        return response.content[0].text
+
 class DatasetExpander():
     system_prompt = "You are an insightful and intuitive mathematician. You're great at solving math problems via brainstorming and non-linear reasoning. Sometimes you go down dead-ends but eventually you uncover and synthesize the insights needed to form the correct answer."
-    system_prompt_verifier = "You are a mathematician and former Putnam gold medalist. You respond only in JSON."
+    system_prompt_verifier = "You are a mathematician and former Putnam gold medalist."
     def __init__(self, dataset, provider, provider_verifier, model, model_verifier, max_attempts_generator=4, max_attempts_verifier=2):
         self.dataset = dataset
         self.provider = provider
@@ -35,7 +51,7 @@ class DatasetExpander():
 
         self.dataset_steps = []
 
-    def call_llm(self, messages, type, llm_options={}):
+    def call_llm(self, system_prompt, messages, type, llm_options={}, verbose=False):
         if type == 'generator':
             model = self.model
             client = self.client
@@ -46,58 +62,83 @@ class DatasetExpander():
         finished = False
         reply = ''
         while not finished:
-            response = self.call_llm_base(messages, model, client, llm_options)
-            finish_reason = response.choices[0].finish_reason
+            response = self.call_llm_base(system_prompt, messages, model, client, llm_options, verbose=verbose)
+            finish_reason = response_to_finish_reason(client, response)
 
-            if finish_reason == 'length':
+            if finish_reason == 'length' or finish_reason == 'max_tokens':
                 raise Exception("Conversation too long")
             elif finish_reason == "content_filter":
                 raise Exception("Conversation filtered")
 
             # finish reason not implemented in some providers
-            finished = (finish_reason == "stop") or (finish_reason is None)
-            reply += response.choices[0].message.content
+            finished = finish_reason in ["stop", "eos", "end_turn", None]
+
+            content = response_to_text(client, response)
+            reply += content
 
         return reply
 
     @retry(stop=stop_after_attempt(3))
-    def call_llm_base(self, messages, model, client, llm_options={}):
+    def call_llm_base(self, system_prompt, messages, model, client, llm_options={}, verbose=False):
         try:
-            response = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                **llm_options
-            )
+            if type(client).__name__ == "OpenAI":
+                system_message = {"role": "system", "content": system_prompt}
+                messages = [system_message] + messages
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    **llm_options
+                )
+            elif type(client).__name__ == "Anthropic":
+                if "response_format" in llm_options and llm_options["response_format"]["type"] == "json_object":
+                    # prefill with { to constrain to JSON
+                    messages.append({"role": "assistant", "content": "{"})
+
+                response = client.messages.create(
+                    model=model,
+                    system=system_prompt,
+                    messages=messages,
+                    max_tokens=MAX_TOKENS_CLAUDE
+                )
+
+                if "response_format" in llm_options and llm_options["response_format"]["type"] == "json_object":
+                    # prepend with {
+                    response.content[0].text = "{" + response.content[0].text
+                return response
         except Exception as e:
             print("Couldn't call LLM, retrying...", e)
             raise e
+
+        if verbose:
+            # print conversation
+            request_text = messages[-1]['content']
+            response_text = response_to_text(client, response)
+            print(f"User:\n{request_text}")
+            print(f"Assistant:\n{response_text}")
+
         return response
 
-    def run_conversation(self, prompts, system_prompt=None, type='generator', llm_options={}):
+    def run_conversation(self, prompts, system_prompt=None, type='generator', llm_options={}, verbose=True):
         if system_prompt is None:
             if type=='generator':
                 system_prompt = DatasetExpander.system_prompt
             elif type=='verifier':
                 system_prompt = DatasetExpander.system_prompt_verifier
 
-        messages = [
-            {"role": "system", "content": system_prompt}
-        ]
+        messages = []
 
         for prompt in prompts:
             message = {"role": "user", "content": prompt}
             messages.append(message)
-            last_step = self.call_llm(messages, type=type, llm_options=llm_options)
+            last_step = self.call_llm(system_prompt, messages, type=type, llm_options=llm_options, verbose=verbose)
             new_message = {"role": "assistant", "content": last_step}
             messages.append(new_message)
 
         return messages
 
     def run_conversation_with_checks(self, prompts, problem=None, solution=None, llm_options={}):
-        messages = [
-            {"role": "system", "content": DatasetExpander.system_prompt}
-        ]
-
+        system_prompt = DatasetExpander.system_prompt
+        messages = []
         dataset_steps = []
 
         for prompt in prompts:
@@ -116,7 +157,7 @@ class DatasetExpander():
             index = 0
 
             while not passed_check and len(step_data['completions']) < self.max_attempts_generator + self.max_attempts_verifier:
-                last_step = self.call_llm(messages, type=type, llm_options=llm_options)
+                last_step = self.call_llm(system_prompt, messages, type=type, llm_options=llm_options)
 
                 # check steps:
                 result = self.check_step(problem, solution, steps, last_step)
@@ -168,12 +209,10 @@ class DatasetExpander():
         prompt = prompt.format(problem=problem, solution=solution, steps_str=steps_str)
 
         system_prompt = 'You are a mathematician and former Putnam gold medalist. You respond only in JSON.'
-        llm_options = {
-            "response_format": {"type": "json_object"}
-        }
+        llm_options = {"response_format": {"type": "json_object"}}
 
-        response = self.run_conversation([prompt], type='verifier', system_prompt=system_prompt, llm_options=llm_options)
-        return json.loads(response[-1]['content'])
+        messages = self.run_conversation([prompt], type='verifier', system_prompt=system_prompt, llm_options=llm_options)
+        return json.loads(messages[-1]['content'])
 
     def compare_solutions(self, problem, solution_actual, solution_generated):
         with open('prompts/prompt_compare.txt') as f:
@@ -238,10 +277,11 @@ class DatasetExpander():
         dataset = self.run_conversation_with_checks(prompts, problem, solution, llm_options=llm_options)
         return dataset
 
-    def expand_dataset(self, llm_options={}, save=True, save_path=''):
+    def expand_dataset(self, cutoff=None, llm_options={}, save=True, save_path=''):
         dataset_steps = []
         for index, data in enumerate(self.dataset):
-            if index > 10:
+            start_time = time.time()
+            if cutoff is not None and index > cutoff:
                 break
 
             problem = data['problem']
@@ -249,13 +289,19 @@ class DatasetExpander():
 
             problem_steps = self.expand_problem(problem, solution, llm_options=llm_options)
 
+            stop_time = time.time()
+            time_elapsed = stop_time - start_time
+
             problem_steps['year'] = data['year']
             problem_steps['label'] = data['label']
             problem_steps['id'] = f"{data['year']}_{data['label']}"
             problem_steps['model'] = self.model
             problem_steps['model_verifier'] = self.model_verifier
+            problem_steps['time_elapsed'] = time_elapsed
 
             dataset_steps.append(problem_steps)
+
+            print(f"Problem {index} took {time_elapsed} seconds")
 
             # save dataset incrementally
             if save:
@@ -263,7 +309,8 @@ class DatasetExpander():
                     json.dump(dataset_steps, f, indent=4)
 
 if __name__ == "__main__":
-    Options = [
+    save = True
+    options = [
         "gpt-4-1106-preview",
         "gpt-3.5-turbo",
         "mistral-7b-instruct",
@@ -276,25 +323,30 @@ if __name__ == "__main__":
         "wizardlm-13b",
         "llema-7b",
         "deepseek-chat",
-        "deepseek-coder"]
+        "deepseek-coder",
+        "claude3"]
 
-    # model_nick = "mixtral-8x7b-instruct"
-    model_nick = "deepseek-chat"
-    model_verifier_nick = "gpt-4-1106-preview"
+    model_nick = "mixtral-8x7b-instruct"
+    provider = 'together'
+    # model_nick = "deepseek-chat"
 
     max_attempts_generator = 4
     max_attempts_verifier = 2
     llm_options = {"temperature": 0.5}
+    cutoff = 10
 
-    # Options: ["openai", "perplexity", "together", "deepseek"]
-    provider = 'deepseek'
-    provider_verifier = 'openai'
+    # Options: ["openai", "perplexity", "together", "deepseek", "anthropic"]
+
+    # provider_verifier = 'openai'
+    provider_verifier = 'anthropic'
+    model_verifier_nick = "claude3"
 
     # load jsonl dataset into array
     with open('datasets/math_competitions/putnam.jsonl') as f:
         dataset = [json.loads(line) for line in f]
 
-    save_path = f'datasets_synthetic/putnam_steps_{model_nick}.json'
+    date = datetime.now().strftime("%Y-%m-%d")
+    save_path = f'datasets_synthetic/putnam_steps_g_{model_nick}_v_{model_verifier_nick}_{date}.json'
     expander = DatasetExpander(
         dataset,
         provider,
@@ -304,4 +356,4 @@ if __name__ == "__main__":
         max_attempts_generator=max_attempts_generator,
         max_attempts_verifier=max_attempts_verifier)
 
-    expander.expand_dataset(llm_options=llm_options, save=True, save_path=save_path)
+    expander.expand_dataset(cutoff=cutoff, llm_options=llm_options, save=save, save_path=save_path)

@@ -1,5 +1,6 @@
 import os
 from openai import OpenAI
+import anthropic
 
 def get_model_path(model, provider):
     if provider == 'openai':
@@ -60,6 +61,11 @@ def get_model_path(model, provider):
             model_name = 'deepseek-code'
         else:
             raise Exception(f"Model {model} only supported by {provider} provider")
+    elif model == 'claude3':
+        if provider == 'anthropic':
+            model_name = 'claude-3-sonnet-20240229'
+        else:
+            raise Exception(f"Model {model} only supported by {provider} provider")
     else:
         raise Exception(f"Model {model} not supported")
 
@@ -67,6 +73,13 @@ def get_model_path(model, provider):
 
 
 def get_client(provider):
+    if provider == "anthropic":
+        api_key = os.getenv('ANTHROPIC_API_KEY')
+        client = anthropic.Anthropic(
+            api_key=api_key
+        )
+        return client
+
     if provider == "openai":
         api_key = os.getenv('OPENAI_API_KEY')
         base_url = "https://api.openai.com/v1"

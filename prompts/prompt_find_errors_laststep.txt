@@ -19,4 +19,5 @@ Grading:
 Student's Steps:
 {steps_str}
 
-Output your results in JSON with the following schema `{{step: step_num, explanation: explanation, result: result}}` where `step_num` is an integer, `explanation` is a brief explanation as a string, and `result` is an integer (-1, 0, or 1) indicating the rating of the step as above.
+Output your response in JSON with the following schema `{{step: step_num, explanation: explanation, result: result}}` where `step_num` is an integer, `explanation` is a brief explanation as a string, and `result` is an integer (-1, 0, or 1) indicating the rating of their last step as above.
+Remember, we are only evaluating their last step.
