@@ -1,5 +1,6 @@
 # Generate synthetic non-linear reasoning steps inbetween problem/solution of dataset
 
+import os
 import json
 import dotenv
 from utils import get_model_path, get_client
@@ -199,7 +200,7 @@ class DatasetExpander():
         generated_solution = parse_messages(messages)[-1]
         is_solution_correct = self.compare_solutions(problem, solution, generated_solution)
 
-        dataset = {
+        expansion = {
             "problem": problem,
             "solution": solution,
             "steps": dataset_steps,
@@ -207,7 +208,7 @@ class DatasetExpander():
             "is_solution_correct": is_solution_correct
         }
 
-        return dataset
+        return expansion
 
     def check_step(self, problem, solution, steps, last_step):
         steps_str = ''
@@ -269,10 +270,9 @@ class DatasetExpander():
                 'explanation': step_annotated['explanation']
             })
 
-        self.dataset_steps.append({
-            'year': data['year'],
-            'label': data['label'],
-            'id': f"{data['year']}_{data['label']}",
+        id = data['id']
+        self.dataset_steps[id] = {
+            'id': id,
             'problem': data['problem'],
             'solution': data['solution'],
             "model": model,
@@ -280,20 +280,35 @@ class DatasetExpander():
             'generated_solution': generated_solution,
             'is_solution_correct': is_solution_correct,
             'steps': processed_steps
-        })
+        }
 
     def expand_problem(self, problem, solution, llm_options={}):
         insights = self.get_insights(problem, solution)
         prompts = self.get_conversation_prompts(problem, insights=insights)
-        dataset = self.run_conversation_with_checks(prompts, problem, solution, llm_options=llm_options)
-        return dataset
+        expansion = self.run_conversation_with_checks(prompts, problem, solution, llm_options=llm_options)
+        return expansion
 
     def expand_dataset(self, cutoff=None, llm_options={}, save=True, save_path=''):
-        dataset_steps = []
+        # load dataset if it exists at save_path
+        if os.path.exists(save_path):
+            # load jsonl file into dictionary
+            with open(save_path) as f:
+                for line in f:
+                    data = json.loads(line)
+                    id = data['id']
+                    dataset_steps[id] = data
+        else:
+            dataset_steps = {}
+
         for index, data in enumerate(self.dataset):
             start_time = time.time()
             if cutoff is not None and index > cutoff:
                 break
+
+            id = data['id']
+            if id in dataset_steps:
+                print(f"Skipping problem {index} as it already exists in dataset")
+                continue
 
             problem = data['problem']
             solution = data['solution']
@@ -303,24 +318,25 @@ class DatasetExpander():
             stop_time = time.time()
             time_elapsed = stop_time - start_time
 
-            problem_steps['year'] = data['year']
-            problem_steps['label'] = data['label']
-            problem_steps['id'] = f"{data['year']}_{data['label']}"
+            problem_steps['id'] = id
             problem_steps['model'] = self.model
             problem_steps['model_verifier'] = self.model_verifier
             problem_steps['time_elapsed'] = time_elapsed
 
-            dataset_steps.append(problem_steps)
+            dataset_steps[id] = problem_steps
 
             print(f"Problem {index} took {time_elapsed} seconds")
 
-            # save dataset incrementally
+            # save dataset as jsonl file incrementally
             if save:
-                with open(save_path, 'w') as f:
-                    json.dump(dataset_steps, f, indent=4)
+                with open(save_path, 'a') as f:
+                    f.write(json.dumps(problem_steps) + '\n')
 
 if __name__ == "__main__":
     save = True
+    # dataset_path = 'datasets/math_competitions/putnam.jsonl'
+    dataset_path = 'datasets/combined.jsonl'
+
     options = [
         "gpt-4-1106-preview",
         "gpt-3.5-turbo",
@@ -344,7 +360,7 @@ if __name__ == "__main__":
     max_attempts_generator = 4
     max_attempts_verifier = 2
     llm_options = {"temperature": 0.5}
-    cutoff = 100
+    cutoff = 10
 
     # Options: ["openai", "perplexity", "together", "deepseek", "anthropic"]
 
@@ -356,11 +372,11 @@ if __name__ == "__main__":
     # model_verifier_nick = "claude3-opus"
 
     # load jsonl dataset into array
-    with open('datasets/math_competitions/putnam.jsonl') as f:
+    with open(dataset_path) as f:
         dataset = [json.loads(line) for line in f]
 
     date = datetime.now().strftime("%Y-%m-%d")
-    save_path = f'datasets_synthetic/putnam_steps_g_{model_nick}_v_{model_verifier_nick}_{date}.json'
+    save_path = f'datasets_synthetic/putnam_steps_g_{model_nick}_v_{model_verifier_nick}.jsonl'
     expander = DatasetExpander(
         dataset,
         provider,
