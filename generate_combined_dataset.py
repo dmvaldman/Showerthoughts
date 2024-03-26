@@ -12,15 +12,17 @@ import requests
 import matplotlib.pyplot as plt
 from io import BytesIO
 import tkinter as tk
-from PIL import Image, ImageTk
-import uuid
+from PIL import Image, ImageTk, ImageGrab, ImageDraw, ImageFont
+import hashlib
+from weasyprint import HTML
+import base64
 
 
 client = openai.Client()
 
-def dedupe(df, threshold=0.85, plot=False, save=False):
+def dedupe(df, threshold=0.85, plot=False, save=False, force=False):
     corpus_problems = df['problem'].tolist()
-    embeddings_problem = embed(corpus_problems, save=save, save_path="datasets/combined_embeddings.npy")
+    embeddings_problem = embed(corpus_problems, save=save, save_path="datasets/combined_embeddings.npy", force=force)
 
     index_neighbors = create_faiss_index(embeddings_problem)
     D_problems, I_problems = index_neighbors.search(embeddings_problem, k=4)
@@ -53,104 +55,94 @@ def dedupe(df, threshold=0.85, plot=False, save=False):
                 dupe_indices.append((index, dupe_index, distance))
                 # print(f"Dupe: (p:{distance})\n{index}: {corpus_problems[index]}\n{dupe_index}: {corpus_problems[dupe_index]}\n\n")
 
-    return dupe_indices
+    dupe_indices = [dupe_index for _, dupe_index, _ in dupe_indices]
+    df_deduped = df.drop(df.index[dupe_indices])
+
+    return df_deduped
+
+def save_window(root, filename="saved_window.png"):
+    root.update_idletasks()  # Update "idle" tasks to ensure geometry is updated
+    root.withdraw()  # Hide the window as we don't want it to appear in the screenshot
+    x = root.winfo_rootx()
+    y = root.winfo_rooty()
+    x1 = x + root.winfo_width()
+    y1 = y + root.winfo_height()
+    ImageGrab.grab().crop((x, y, x1, y1)).save(filename)
+    root.deiconify()  # Show the window again
 
 def filter(dataset):
     # if problem has https://cdn.mathpix.com/ in it, remove it
     dataset = dataset[~dataset['problem'].str.contains('https://cdn.mathpix.com/')]
     # this problem contains an images, references an image in the solution, is it solvable without access to the image?
 
+def create_captioned_image(image_bytes, caption, save=False, save_path=''):
+    # we append _keep, _remove after the fact to the path
+    save_path_firstpart = save_path.split('_')[0]
 
-def filter_img_urls(problems, dir='images', save=False, save_path=''):
+    if os.path.exists(save_path_firstpart):
+        print(f"Image already exists at {save_path}")
+        return
+
+    encoded_image_data = base64.b64encode(image_bytes).decode('utf-8')
+
+    # sanitize caption for html
+    caption = caption.replace('<', '&lt;')
+    caption = caption.replace('>', '&gt;')
+
+    # Create an HTML string with your image and caption
+    html_template = f"""
+    <html>
+    <head>
+        <style>
+            body {{ text-align: center; }}
+            img {{ max-width: 100%; }}
+            .caption {{ font-family: Arial, sans-serif; margin-top: 10px; font-size: 1.3em;}}
+        </style>
+    </head>
+    <body>
+        <img src="data:image/png;base64,{encoded_image_data}" alt="captioned image">
+        <div class="caption">{caption}</div>
+    </body>
+    </html>
+    """
+
+    # Convert HTML to pdf
+    if save:
+        HTML(string=html_template).write_pdf(save_path)
+
+def extract_images(df, dir='images', save=False):
+    column_names = ['problem', 'solution']
     pattern = r'https://cdn\.mathpix\.com[^\s)]*'
-    urls = []
-    for index, problem in enumerate(problems):
-        found_urls = re.findall(pattern, problem)
-        if found_urls:
-            for url in found_urls:
-                urls.append((index, url))
 
-    responses = {}
-    for index, url in urls:
-        response = requests.get(url)
-        if response.status_code == 200:
-            # print problem
-            print(f'#{index}: {problems[index]})')
+    for column_name in column_names:
+        urls = []
+        for row in df.itertuples():
+            # get column name
+            text = getattr(row, column_name)
+            id = row.id
+            # find first occurence of a url
+            found_urls = re.findall(pattern, text)
+            if found_urls:
+                urls.append((id, found_urls[0], text))
+
+        for id, url, text in urls:
+            response = requests.get(url)
+            if response.status_code == 200:
+                image_bytes = response.content
+            else:
+                print(f"Failed to download image from {url}")
+                continue
 
             # caption is the problem with the url removed
-            caption = problems[index].replace('\n![](' + url + ')', '')
+            caption = text.replace('\n![](' + url + ')', '')
 
-            # Display the image from bytes
-            key = display_image_and_get_response(response.content, caption)
+            # create image + caption
+            save_path = os.path.join(dir, column_name, str(id) + '.pdf')
+            create_captioned_image(image_bytes, caption, save=save, save_path=save_path)
 
-            if key == 'k':
-                responses[index] = True
-            elif key == 'd':
-                responses[index] = False
-            else:
-                print(f"Invalid key: {key}")
-
-            # save image to dir
-            filepath = os.path.join(dir, str(index) + '.jpg')
-            with open(filepath, 'wb') as f:
-                f.write(response.content)
-        else:
-            print(f"Failed to download image from {url}")
-
-    if save:
-        with open(save_path, 'w') as f:
-            json.dump(responses, f)
-
-    return responses
-
-def display_image_and_get_response(image_bytes, caption):
-    """
-    Displays an image and a caption, waits for 'k' or 'd' key press.
-
-    :param image_bytes: Byte array of the image to display.
-    :param caption: Caption to display with the image.
-    :return: 'k' if confirmed, 'd' if denied.
-    """
-    response = {'value': None}
-    caption += '\n\nPress "k" to keep, "d" to delete.'
-
-    def on_key_press(event):
-        """Handle key press event."""
-        nonlocal response
-        if event.char == 'k':
-            response['value'] = 'k'
-            root.destroy()
-        elif event.char == 'd':
-            response['value'] = 'd'
-            root.destroy()
-
-    # Set up the Tkinter window
-    root = tk.Tk()
-    root.title("Image Confirmation")
-
-    # Convert image bytes to Tkinter-compatible format
-    image = Image.open(BytesIO(image_bytes))
-    photo = ImageTk.PhotoImage(image)
-
-    # Add image to the Tkinter window
-    label_image = tk.Label(root, image=photo)
-    label_image.pack()
-
-    # Add caption below the image
-    label_caption = tk.Label(root, text=caption, wraplength=400)
-    label_caption.pack()
-
-    # Bind key press event
-    root.bind("<Key>", on_key_press)
-
-    # Start the GUI event loop
-    root.mainloop()
-
-    return response['value']
-
-def embed(corpus, chunk_size=1000, save=False, save_path=''):
+def embed(corpus, chunk_size=1000, save=False, save_path='', force=False):
     # first load
-    if os.path.exists(save_path):
+    if os.path.exists(save_path) and not force:
         print(f"loading embeddings from disk at {save_path}")
         return np.load(save_path)
 
@@ -201,53 +193,99 @@ def gather(dataset_dir, save_path=None):
             with open(fname) as infile:
                 for line in infile:
                     data = json.loads(line)
-                    id = str(uuid.uuid4())
 
                     if 'instruction' in data:
-                        new_data = {
-                            'id': id,
-                            'type': dataset_dir,
-                            'source': name,
-                            'problem': data['instruction'] + data['input'],
-                            'solution': data['output'],
-                            'hint': '',
-                            'answer': data.get('answer', '')
-                        }
+                        problem = data['instruction'] + data['input']
+                        solution = data['output']
+                        hint = ''
+                        answer = data.get('answer', '')
                     else:
-                        new_data = {
-                            'id': id,
-                            'type': dataset_dir,
-                            'source': name,
-                            'problem': data['problem'],
-                            'solution': data['solution'],
-                            'hint': data.get('hint', ''),
-                            'answer': data.get('answer', '')
-                        }
+                        problem = data['problem']
+                        solution = data['solution']
+                        hint = data.get('hint', '')
+                        answer = data.get('answer', '')
+
+                    # id is hash of the problem text
+                    id = hashlib.md5(problem.encode()).hexdigest()
 
                     # if no solution, use hint or answer
-                    if new_data['solution'] is None:
-                        if new_data['hint'] is not None:
-                            new_data['solution'] = 'Hint: ' + new_data['hint']
+                    if not solution:
+                        if hint:
+                            solution = 'Hint: ' + hint
+                            if answer:
+                                solution += '\nAnswer: ' + answer
+                        elif answer:
+                            solution = 'Answer: ' + answer
                         else:
-                            new_data['solution'] = new_data['answer']
+                            continue
+
+                    normalized_data = {
+                        'id': id,
+                        'type': dataset_dir,
+                        'source': name,
+                        'problem': problem,
+                        'solution': solution,
+                        'hint': hint,
+                        'answer': answer
+                    }
 
                     # write to jsonl
-                    outfile.write(json.dumps(new_data) + '\n')
+                    outfile.write(json.dumps(normalized_data) + '\n')
 
-save_path = 'datasets/combined2.jsonl'
-# combined all datasets in the dataset directory
-gather("datasets", save_path=save_path)
+        df = pd.read_json(save_path, lines=True)
+        return df
 
-# Load the dataset
-df = pd.read_json(save_path, lines=True)
+def filter_bad_images(df, dir='images'):
+    # loop through image directories and extract first/second part of filename
+    column_names = ['problem', 'solution']
+    for column_name in column_names:
+        image_dir = os.path.join(dir, column_name)
+        for _, _, files in os.walk(image_dir):
+            for file in files:
+                file_parts = file.split('_')
+                if len(file_parts) < 2:
+                    continue
+                id = file_parts[0]
+                status = file_parts[1]
 
-# Filter dataset for images
-# This will run a simple GUI asking to confirm/deny if the image is necessary to solve the problem.
-# If not, we can remove the reference, if so, we can delete the row to keep things text-only
-filter_indices_problems = filter_img_urls(df['problem'], dir='images/images_problems', save=True, save_path = 'datasets/filter_indices_problems.json')
-filter_indices_solutions = filter_img_urls(df['solution'], dir='images/images_solutions', save=True, save_path = 'datasets/filter_indices_solutions.json')
+                if status == 'k':
+                    # remove URL content from the dataframe row with the id
+                    pattern = r'https://cdn\.mathpix\.com[^\s)]*'
+                    row = df[df['id'] == id]
+                    text = row[column_name].values[0]
+                    text = re.sub(pattern, '', text)
+                    df.loc[df['id'] == id, column_name] = text
+                elif status == 'd':
+                    # delete the row with the id
+                    df = df[df['id'] != id]
+    return df
 
-# Dedupe repeating problems using cosine similarity
-dupe_indices_data = dedupe(df, threshold=0.85, plot=False, save=True)
-dupe_indices = [dupe_index for _, dupe_index, _ in dupe_indices_data]
-df_deduped = df.drop(df.index[dupe_indices])
+def postprocess(df):
+    # Remove the text FIGURE ##
+    df['problem'] = df['problem'].str.replace(r'FIGURE \d+', '')
+    df['solution'] = df['solution'].str.replace(r'FIGURE \d+', '')
+
+
+def main():
+    save_path = 'datasets/combined.jsonl'
+
+    # combined all datasets in the dataset directory
+    df = gather("datasets", save_path=save_path)
+
+    # Dedupe repeating problems using cosine similarity
+    df = dedupe(df, threshold=0.85, plot=False, save=True, force=False)
+
+    # Filter dataset for images
+    extract_images(df, dir='images', save=False)
+
+    # Filter out problems with bad images
+    df = filter_bad_images(df, dir='images')
+
+    # Postprocess the dataset
+    df = postprocess(df)
+
+    # Save the final dataset
+    df.to_json('datasets/combined_final.jsonl', orient='records', lines=True)
+
+if __name__ == '__main__':
+    main()
